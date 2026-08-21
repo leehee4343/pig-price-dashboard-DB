@@ -1953,7 +1953,9 @@ function generateTableFromChartInstance(chart) {
       autoTableWrap.remove();
     }
     
-    const labels = chart.data.labels || [];
+    // 차트 축에는 truncLabel로 축약한 라벨을 쓰지만, 자동 생성 표는 스크롤이 되니
+    // 축약하지 않은 전체 이름(chart.data.fullLabels가 있으면 그쪽)을 우선 쓴다.
+    const labels = chart.data.fullLabels || chart.data.labels || [];
     const datasets = (chart.data.datasets || []).filter((_, index) => !chart.isDatasetVisible || chart.isDatasetVisible(index));
     if (!labels.length || !datasets.length) return;
     const isSizePriceChart = chartId === 'lr_c_size_price1' || chartId === 'lr_c_size_price2';
@@ -2296,7 +2298,7 @@ function renderP1(){
   const top5 = [...DATA.company].sort((a,b)=>b.총거래금액-a.총거래금액).slice(0,5);
   new Chart(document.getElementById('c_overview_top5'), {
     type:'bar',
-    data:{ labels: top5.map(d=>truncLabel(d.업체)), datasets:[{label:'거래금액(억원)', data: top5.map(d=>+(d.총거래금액/1e8).toFixed(1)), backgroundColor:CH.navy, borderRadius:4, maxBarThickness:40}] },
+    data:{ labels: top5.map(d=>truncLabel(d.업체)), fullLabels: top5.map(d=>d.업체), datasets:[{label:'거래금액(억원)', data: top5.map(d=>+(d.총거래금액/1e8).toFixed(1)), backgroundColor:CH.navy, borderRadius:4, maxBarThickness:40}] },
     options:{indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{callbacks:{title:items=>top5[items[0].dataIndex].업체}}} }
   });
 
@@ -2564,6 +2566,7 @@ function renderP3(){
 
   new Chart(document.getElementById('c_comp_amount'), {
     data:{ labels: sorted.map(d=>truncLabel(d.업체)),
+      fullLabels: sorted.map(d=>d.업체),
       datasets:[
         {type:'bar', label:'거래금액(억원)', data:sorted.map(d=>+(d.총거래금액/1e8).toFixed(1)), backgroundColor:CH.navy, borderRadius:3, maxBarThickness:32, xAxisID:'x', order:2},
         {type:'line', label:'평균단가(원/kg)', data:sorted.map(d=>d.평균kg당가격), borderColor:CH.accent, backgroundColor:CH.accent, xAxisID:'x1', order:1, borderWidth:2.5, pointRadius:3, tension:.2}
@@ -3054,6 +3057,7 @@ function renderP10(){
   new Chart(document.getElementById('c_reg_count'), {
     type:'bar',
     data:{ labels: byCount.map(d=>truncLabel(d.업체)),
+      fullLabels: byCount.map(d=>d.업체),
       datasets:[{label:'등록한 횟수', data: byCount.map(d=>d.등록횟수), backgroundColor:CH.navy, borderRadius:3, maxBarThickness:18}]},
     options:{indexAxis:'y', responsive:true, maintainAspectRatio:false,
       scales:{ x:{ title:{display:true,text:'건'} } },
@@ -3063,6 +3067,7 @@ function renderP10(){
   new Chart(document.getElementById('c_reg_days'), {
     type:'bar',
     data:{ labels: byDays.map(d=>truncLabel(d.업체)),
+      fullLabels: byDays.map(d=>d.업체),
       datasets:[{label:'거래일 횟수', data: byDays.map(d=>d.거래일수), backgroundColor:CH.accent, borderRadius:3, maxBarThickness:18}]},
     options:{indexAxis:'y', responsive:true, maintainAspectRatio:false,
       scales:{ x:{ title:{display:true,text:'일'} } },
@@ -4454,6 +4459,18 @@ function activatePage(pid, updateHash){
     if (monthSeparatorEl) monthSeparatorEl.style.display = '';
     if (monthEndItemEl) monthEndItemEl.style.display = '';
     populateLegacyMonthFilter();
+  } else if (pid === 'p10') {
+    // 가격 등록현황(전체)은 항상 전체 업체 기준이라 업체 검색이 필요 없다
+    // (업체 단위 조회는 '가격 등록현황(업체별)'(p11)에서 한다).
+    if (filterContainerEl) filterContainerEl.style.display = '';
+    if (regionItemEl) regionItemEl.style.display = '';
+    if (companyItemEl) companyItemEl.style.display = 'none';
+    if (startDateItemEl) startDateItemEl.style.display = '';
+    if (dateSeparatorEl) dateSeparatorEl.style.display = '';
+    if (endDateItemEl) endDateItemEl.style.display = '';
+    if (monthStartItemEl) monthStartItemEl.style.display = 'none';
+    if (monthSeparatorEl) monthSeparatorEl.style.display = 'none';
+    if (monthEndItemEl) monthEndItemEl.style.display = 'none';
   } else {
     if (filterContainerEl) filterContainerEl.style.display = '';
     if (regionItemEl) regionItemEl.style.display = '';
@@ -4619,7 +4636,9 @@ document.getElementById('btnApplyFilter').addEventListener('click', function() {
   const start = document.getElementById('filterStartDate').value;
   const end = document.getElementById('filterEndDate').value;
   const region = document.getElementById('filterRegion').value;
-  const company = document.getElementById('filterCompany').value;
+  // 가격 등록현황(전체)은 업체 검색이 없는 화면이라, 숨겨진 업체 드롭다운에
+  // 이전 화면에서 남은 값이 있어도 항상 전체 업체 기준으로 조회한다.
+  const company = activePid === 'p10' ? '' : document.getElementById('filterCompany').value;
 
   if (!start || !end) {
     alert('조회 시작일과 종료일을 올바르게 선택해 주세요.');
