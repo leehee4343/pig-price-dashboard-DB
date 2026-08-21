@@ -1,0 +1,17 @@
+{
+  "name": "pig-dashboard-upload-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "돼지 거래가격 대시보드 - 팀원용 엑셀 업로드 서버 (로그인 후 업로드하면 GitHub에 직접 커밋)",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@octokit/rest": "^20.1.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0",
+    "multer": "^2.0.0",
+    "xlsx": "^0.18.5"
+  }
+}
