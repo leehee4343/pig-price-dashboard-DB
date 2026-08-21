@@ -291,7 +291,7 @@ validRows.forEach(r => {
   if (!companyGroup[r.company]) {
     companyGroup[r.company] = {
       name: r.company, count: 0, head: 0, live: 0, amount: 0,
-      rateSum: 0, rateCount: 0, prices: [], region: r.region, lastRegDate: r.regDate
+      rateSum: 0, rateCount: 0, prices: [], region: r.region, lastRegDate: r.regDate, dateSet: new Set()
     };
   }
   companyGroup[r.company].count++;
@@ -299,6 +299,7 @@ validRows.forEach(r => {
   companyGroup[r.company].live += r.liveWeight;
   companyGroup[r.company].amount += r.totalAmount;
   companyGroup[r.company].prices.push(r.unitPrice);
+  companyGroup[r.company].dateSet.add(r.date);
   if (r.regDate > companyGroup[r.company].lastRegDate) {
     companyGroup[r.company].lastRegDate = r.regDate;
   }
@@ -382,7 +383,8 @@ const companyList = Object.values(companyGroup).map(g => {
     "평균지급률": g.rateCount > 0 ? parseFloat((g.rateSum / g.rateCount).toFixed(2)) : null,
     "권역": g.region,
     "평균kg당가격": Math.round(meanPrice),
-    "가격변동성": parseFloat(stdDev.toFixed(1))
+    "가격변동성": parseFloat(stdDev.toFixed(1)),
+    "거래일수": g.dateSet.size
   };
 });
 
