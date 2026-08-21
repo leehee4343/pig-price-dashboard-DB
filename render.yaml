@@ -4,7 +4,11 @@ services:
     runtime: node
     plan: free
     rootDir: server
-    buildCommand: npm install
+    # rootDir가 server라서 이 명령들은 server/ 안에서 실행된다.
+    # server/index.js가 상위 폴더의 공용 모듈(../lib/aggregate.js)을 불러오는데, 그 모듈이
+    # 쓰는 xlsx 패키지는 저장소 루트의 package.json에 있으므로 루트에서도 npm install을
+    # 한 번 더 해줘야 한다(그래야 루트 node_modules가 만들어져서 상위 폴더 require가 풀린다).
+    buildCommand: npm install --prefix .. && npm install
     startCommand: npm start
     envVars:
       - key: UPLOAD_PASSWORD
