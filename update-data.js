@@ -2,14 +2,47 @@ const XLSX = require('xlsx');
 const fs = require('fs');
 const path = require('path');
 
-// 엑셀 파일 경로
-const priceFile = path.join(__dirname, '돼지 거래가격정보(202601~202607.xlsx');
-const companyFile = path.join(__dirname, '업체정보(202601~202607.xlsx');
+// 엑셀 파일 탐색: 정확한 파일명 대신 접두어로 찾는다(조사기간이 바뀌거나 "(new)"처럼
+// 파일명이 매번 달라질 수 있어서). 같은 접두어의 파일이 여러 개면 가장 최근에 수정된
+// 파일을 최신본으로 사용한다.
+function findLatestExcel(prefix) {
+  const candidates = fs.readdirSync(__dirname)
+    .filter(f => f.startsWith(prefix) && f.toLowerCase().endsWith('.xlsx'))
+    .map(f => ({ name: f, mtime: fs.statSync(path.join(__dirname, f)).mtimeMs }))
+    .sort((a, b) => b.mtime - a.mtime);
+  return candidates.length ? path.join(__dirname, candidates[0].name) : null;
+}
 
-if (!fs.existsSync(priceFile) || !fs.existsSync(companyFile)) {
+const priceFile = findLatestExcel('돼지 거래가격정보');
+const companyFile = findLatestExcel('업체정보');
+
+if (!priceFile || !companyFile) {
   console.error('Error: Required Excel files do not exist in the directory.');
-  console.error(`Expected files:\n- ${priceFile}\n- ${companyFile}`);
+  console.error('Expected file name prefixes:\n- 돼지 거래가격정보*.xlsx\n- 업체정보*.xlsx');
   process.exit(1);
+}
+console.log(`- 가격정보 파일: ${path.basename(priceFile)}`);
+console.log(`- 업체정보 파일: ${path.basename(companyFile)}`);
+
+// 일부 외부 시스템이 내보낸 엑셀은 시트의 <dimension> 메타데이터가 실제 데이터 범위보다
+// 작게 남아있는 경우가 있다(예: 실제로는 4,700행인데 A1:R3로 기록됨). 이 값을 그대로 믿으면
+// SheetJS가 뒤쪽 데이터를 통째로 못 읽으므로, 실제로 존재하는 셀 좌표를 스캔해 범위를 다시 계산한다.
+function fixSheetRange(ws) {
+  let minR = Infinity, minC = Infinity, maxR = -1, maxC = -1;
+  Object.keys(ws).forEach(key => {
+    if (key[0] === '!') return;
+    const { r, c } = XLSX.utils.decode_cell(key);
+    if (r < minR) minR = r;
+    if (c < minC) minC = c;
+    if (r > maxR) maxR = r;
+    if (c > maxC) maxC = c;
+  });
+  if (maxR < 0) return;
+  const trueRef = XLSX.utils.encode_range({ s: { r: minR, c: minC }, e: { r: maxR, c: maxC } });
+  if (trueRef !== ws['!ref']) {
+    console.warn(`  ⚠ 시트 범위 보정: ${ws['!ref'] || '(없음)'} → ${trueRef}`);
+    ws['!ref'] = trueRef;
+  }
 }
 
 console.log('1. Reading Excel files...');
@@ -17,6 +50,7 @@ function readRows(filePath) {
   const workbook = XLSX.readFile(filePath);
   const sheetName = workbook.SheetNames[0];
   const worksheet = workbook.Sheets[sheetName];
+  fixSheetRange(worksheet);
   return XLSX.utils.sheet_to_json(worksheet, {header: 1});
 }
 
