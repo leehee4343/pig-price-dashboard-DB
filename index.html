@@ -803,11 +803,12 @@ tbody tr:hover { background: var(--bg); }
     <div class="nav-item" data-page="p5">성별·도체 분석</div>
     <div class="nav-item" data-page="p6">지급률 분석</div>
     <div class="nav-item" data-page="p7">데이터 품질·이상치</div>
-    <div class="nav-item" data-page="p10">업체별 등록 현황</div>
+    <div class="nav-item" data-page="p10">가격 등록현황(전체)</div>
   </nav>
   <div class="nav-section-label"><svg class="icon" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18"/><path d="M9 8h1M14 8h1M9 12h1M14 12h1M9 16h1M14 16h1"/></svg>업체 통계/보고서</div>
   <nav class="nav-group">
     <div class="nav-item" data-page="p8">업체 상세 분석</div>
+    <div class="nav-item" data-page="p11">가격 등록현황(업체별)</div>
   </nav>
   <div class="nav-section-label"><svg class="icon" viewBox="0 0 24 24"><path d="M4 4h16v4H4z"/><path d="M6 8v12h12V8"/><path d="M10 12h4"/></svg>참고자료</div>
   <nav class="nav-group">
@@ -893,11 +894,14 @@ tbody tr:hover { background: var(--bg); }
   <!-- ============ P7 데이터 품질 ============ -->
   <div class="page" id="p7"></div>
 
-  <!-- ============ P10 업체별 등록 현황 ============ -->
+  <!-- ============ P10 가격 등록현황(전체) ============ -->
   <div class="page" id="p10"></div>
 
   <!-- ============ P8 업체용 종합현황 ============ -->
   <div class="page" id="p8"></div>
+
+  <!-- ============ P11 가격 등록현황(업체별) ============ -->
+  <div class="page" id="p11"></div>
 
   <!-- ============ P9 기존 보고용 통계 (레거시 리포트) ============ -->
   <div class="page" id="p9"></div>
@@ -2922,13 +2926,13 @@ function buildRegistrationStatusList(){
 }
 
 let regStatusGranularity = '월';
-const p10Charts = {}; // canvas id -> Chart 인스턴스
-function destroyP10Chart(canvasId){
-  const inst = p10Charts[canvasId];
+const p11Charts = {}; // canvas id -> Chart 인스턴스
+function destroyP11Chart(canvasId){
+  const inst = p11Charts[canvasId];
   if (inst) {
     try { inst.destroy(); } catch(e) {}
     activeCharts = activeCharts.filter(c => c !== inst);
-    delete p10Charts[canvasId];
+    delete p11Charts[canvasId];
   }
 }
 function regStatusPeriodToggleHtml(){
@@ -2942,7 +2946,7 @@ function regStatusPeriodToggleHtml(){
 }
 function setRegStatusGranularity(g){
   regStatusGranularity = g;
-  renderP10();
+  renderP11();
 }
 
 // 선택한 업체 1개에 대해서만 월/주/일 단위로 등록 횟수·거래일 횟수를 다시 집계한다.
@@ -2999,15 +3003,6 @@ function computeCompanyRegTrend(companyName, startDate, endDate){
 
 // 상단 검색바에서 업체를 선택했는지에 따라 전체 업체 개요 / 단일 업체 월·주·일 추이로 분기한다.
 function renderP10(){
-  const targetCompany = getBizTargetCompany();
-  if (targetCompany) {
-    renderP10CompanyTrend(targetCompany);
-  } else {
-    renderP10Overview();
-  }
-}
-
-function renderP10Overview(){
   const combined = buildRegistrationStatusList();
   const totalCompanies = combined.length;
   const avgCount = totalCompanies ? combined.reduce((s,d)=>s+d.등록횟수,0)/totalCompanies : 0;
@@ -3017,7 +3012,7 @@ function renderP10Overview(){
   const byDays = [...combined].sort((a,b)=>b.거래일수-a.거래일수);
 
   document.getElementById('p10').innerHTML = `
-  <div style="margin-bottom:14px; padding:10px 16px; background:#EDF5FB; border-left:4px solid var(--navy2); border-radius:8px; font-size:13px; color:var(--navy);">전체 업체 기준 현황입니다. 상단 검색바에서 특정 업체를 선택하면 그 업체의 월/주/일별 등록 현황 추이를 볼 수 있습니다.</div>
+  <div style="margin-bottom:14px; padding:10px 16px; background:#EDF5FB; border-left:4px solid var(--navy2); border-radius:8px; font-size:13px; color:var(--navy);">전체 업체 기준 현황입니다. 특정 업체의 월/주/일별 등록 현황 추이는 좌측 메뉴의 <b>'가격 등록현황(업체별)'</b>에서 확인할 수 있습니다.</div>
   <div class="kpi-row">
     ${kpiCard('', 'building', '조사대상 업체 수', totalCompanies+' 개사')}
     ${kpiCard('', 'doc', '업체당 평균 등록횟수', fmt(Math.round(avgCount))+' 건')}
@@ -3075,10 +3070,28 @@ function renderP10Overview(){
   });
 }
 
-function renderP10CompanyTrend(companyName){
+function renderP11(){
+  const el = document.getElementById('p11');
+  const companyName = getBizTargetCompany();
+
+  if (!companyName) {
+    el.innerHTML = `
+      <div class="card" style="padding: 60px 40px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 360px;">
+        <div class="icon-circle" style="width: 70px; height: 70px; margin-bottom: 20px; background: #EDF5FB; display: flex; align-items: center; justify-content: center; border-radius: 50%;">
+          <svg viewBox="0 0 24 24" style="width: 32px; height: 32px; stroke: var(--navy); fill: none; stroke-width: 2;">
+            <rect x="4" y="3" width="16" height="18"/>
+            <path d="M9 8h1M14 8h1M9 12h1M14 12h1M9 16h1M14 16h1"/>
+          </svg>
+        </div>
+        <h3 style="font-size: 18px; font-weight: 700; color: var(--navy); margin-bottom: 8px; font-family: 'Noto Sans KR', sans-serif;">조회 대상 업체 미선택</h3>
+        <p style="color: var(--text-sub); font-size: 14px; margin-bottom: 0; font-family: 'Noto Sans KR', sans-serif;">가격 등록현황(업체별)을 조회하려면 상단 검색바에서 업체를 선택해 주세요.</p>
+      </div>
+    `;
+    return;
+  }
+
   const { start, end } = getBizFilterDates();
   const trend = computeCompanyRegTrend(companyName, start, end);
-  const el = document.getElementById('p10');
 
   if (trend.totalCount === 0) {
     el.innerHTML = `<div class="card"><div class="note">선택하신 조회기간에 해당하는 등록 데이터가 없습니다. 조회기간을 다시 확인해 주세요.</div></div>`;
@@ -3092,7 +3105,7 @@ function renderP10CompanyTrend(companyName){
   const avgPerDay = trend.totalDays > 0 ? trend.totalCount / trend.totalDays : 0;
 
   el.innerHTML = `
-  <div style="margin-bottom:14px; padding:10px 16px; background:#EDF5FB; border-left:4px solid var(--navy2); border-radius:8px; font-size:13px; color:var(--navy);">현재 <b>${companyName}</b>의 등록 현황을 표시합니다. 전체 업체 현황을 보려면 상단 검색바에서 업체 선택을 해제(전체 업체)하고 조회해 주세요.</div>
+  <div style="margin-bottom:14px; padding:10px 16px; background:#EDF5FB; border-left:4px solid var(--navy2); border-radius:8px; font-size:13px; color:var(--navy);">현재 <b>${companyName}</b>의 등록 현황을 표시합니다. 전체 업체 현황은 좌측 메뉴의 <b>'가격 등록현황(전체)'</b>에서 확인할 수 있습니다.</div>
   <div class="kpi-row">
     ${kpiCard('', 'doc', '총 등록 횟수', fmt(trend.totalCount)+' 건')}
     ${kpiCard('', 'calendar', '총 거래일 횟수', fmt(trend.totalDays)+' 일')}
@@ -3121,17 +3134,17 @@ function renderP10CompanyTrend(companyName){
     </div>
   </div>`;
 
-  destroyP10Chart('c_reg_trend_count');
+  destroyP11Chart('c_reg_trend_count');
   fitScrollWidth('c_reg_trend_count', 'regCountTrendInner', src.length, gran);
-  p10Charts['c_reg_trend_count'] = new Chart(document.getElementById('c_reg_trend_count'), {
+  p11Charts['c_reg_trend_count'] = new Chart(document.getElementById('c_reg_trend_count'), {
     type:'bar',
     data:{ labels, datasets:[{label:'등록한 횟수', data: src.map(d=>d.등록횟수), backgroundColor:CH.navy, borderRadius:4, maxBarThickness:40}] },
     options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}} }
   });
 
-  destroyP10Chart('c_reg_trend_days');
+  destroyP11Chart('c_reg_trend_days');
   fitScrollWidth('c_reg_trend_days', 'regDaysTrendInner', src.length, gran);
-  p10Charts['c_reg_trend_days'] = new Chart(document.getElementById('c_reg_trend_days'), {
+  p11Charts['c_reg_trend_days'] = new Chart(document.getElementById('c_reg_trend_days'), {
     type:'bar',
     data:{ labels, datasets:[{label:'거래일 횟수', data: src.map(d=>d.거래일수), backgroundColor:CH.accent, borderRadius:4, maxBarThickness:40}] },
     options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}} }
@@ -4360,12 +4373,12 @@ function renderP9(){
 }
 
 // ================= 네비게이션, 테마 관리 & 초기화 =================
-const titles = {p1:'종합현황', p3:'업체별 비교', p4:'권역별 현황', p5:'성별·도체 분석', p6:'지급률 분석', p7:'데이터 품질·이상치', p10:'업체별 등록 현황', p8:'업체 상세 분석', p9:'기존 보고용 통계'};
-const renderFns = {p1:renderP1, p3:renderP3, p4:renderP4, p5:renderP5, p6:renderP6, p7:renderP7, p10:renderP10, p8:renderP8, p9:renderP9};
+const titles = {p1:'종합현황', p3:'업체별 비교', p4:'권역별 현황', p5:'성별·도체 분석', p6:'지급률 분석', p7:'데이터 품질·이상치', p10:'가격 등록현황(전체)', p8:'업체 상세 분석', p11:'가격 등록현황(업체별)', p9:'기존 보고용 통계'};
+const renderFns = {p1:renderP1, p3:renderP3, p4:renderP4, p5:renderP5, p6:renderP6, p7:renderP7, p10:renderP10, p8:renderP8, p11:renderP11, p9:renderP9};
 let rendered = {};
 
 // 메뉴마다 서로 다른 URL(해시)이 붙도록 페이지 id <-> 해시 문자열을 매핑한다.
-const PAGE_HASH = {p1:'overview', p3:'company', p4:'region', p5:'gender', p6:'rate', p7:'quality', p10:'reg-status', p8:'biz-overview', p9:'legacy-report'};
+const PAGE_HASH = {p1:'overview', p3:'company', p4:'region', p5:'gender', p6:'rate', p7:'quality', p10:'reg-status', p8:'biz-overview', p11:'reg-status-company', p9:'legacy-report'};
 const HASH_PAGE = Object.fromEntries(Object.entries(PAGE_HASH).map(([pid, h]) => [h, pid]));
 
 // 메뉴 클릭·URL 해시 변경(뒤로/앞으로가기 포함) 양쪽에서 공통으로 쓰는 페이지 전환 함수.
@@ -4375,26 +4388,28 @@ function activatePage(pid, updateHash){
   const previousNavItem = document.querySelector('.nav-item.active');
   const previousPid = previousNavItem ? previousNavItem.dataset.page : '';
   const companySelEl = document.getElementById('filterCompany');
-  const enteringBizReport = pid === 'p8' && previousPid !== 'p8';
-  const returningToAdmin = pid !== 'p8' && pid !== 'p9' && previousPid === 'p8';
+  // 업체 하나를 반드시 선택해야 하는 "업체별" 화면들 (업체 상세 분석 / 가격 등록현황(업체별)).
+  const isBizPage = p => p === 'p8' || p === 'p11';
+  const enteringBizReport = isBizPage(pid) && !isBizPage(previousPid);
+  const returningToAdmin = !isBizPage(pid) && pid !== 'p9' && isBizPage(previousPid);
 
-  // 업체 상세 분석은 전체 업체 조회를 제공하지 않고 반드시 한 업체를 선택해야 한다.
+  // 업체별 화면은 전체 업체 조회를 제공하지 않고 반드시 한 업체를 선택해야 한다.
   if (companySelEl) {
     const emptyCompanyOption = companySelEl.querySelector('option[value=""]');
     if (emptyCompanyOption) {
-      const isBizReport = pid === 'p8';
+      const isBizReport = isBizPage(pid);
       emptyCompanyOption.textContent = isBizReport ? '업체를 선택하세요' : '전체 업체';
       emptyCompanyOption.disabled = isBizReport;
     }
   }
 
-  // 업체 통계 보고서는 진입할 때마다 업체 미선택 상태로 시작한다.
+  // 업체별 화면은 진입할 때마다 업체 미선택 상태로 시작한다.
   if (enteringBizReport && companySelEl) {
     companySelEl.value = '';
-    rendered['p8'] = false;
+    rendered[pid] = false;
   }
 
-  // 업체 보고서에서 관리자 메뉴로 돌아오면 전체 업체 기준으로 복원한다.
+  // 업체별 화면에서 관리자 메뉴로 돌아오면 전체 업체 기준으로 복원한다.
   if (returningToAdmin && companySelEl) {
     companySelEl.value = '';
     const start = document.getElementById('filterStartDate').value;
@@ -4407,7 +4422,7 @@ function activatePage(pid, updateHash){
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id === pid));
   document.getElementById('pageTitle').textContent = titles[pid];
 
-  // 관리자 업체 상세 분석(p8)에서는 지역 검색을 숨기고 선택한 업체를 분석한다.
+  // 업체별 화면(p8/p11)에서는 지역 검색을 숨기고 선택한 업체를 분석한다.
   const regionItemEl = document.getElementById('filterRegionItem');
   const filterContainerEl = document.getElementById('filterContainer');
   const companyItemEl = document.getElementById('filterCompanyItem');
@@ -4417,7 +4432,7 @@ function activatePage(pid, updateHash){
   const monthStartItemEl = document.getElementById('filterMonthStartItem');
   const monthSeparatorEl = document.getElementById('filterMonthSeparator');
   const monthEndItemEl = document.getElementById('filterMonthEndItem');
-  if (pid === 'p8') {
+  if (pid === 'p8' || pid === 'p11') {
     if (filterContainerEl) filterContainerEl.style.display = '';
     if (regionItemEl) regionItemEl.style.display = 'none';
     if (companyItemEl) companyItemEl.style.display = '';
