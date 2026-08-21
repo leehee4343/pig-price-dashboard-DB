@@ -2180,6 +2180,18 @@ function cardHead(icon, title, extra=''){
 // ================= P1 종합현황 =================
 function renderP1(){
   const k = DATA.kpi;
+  const monthly = DATA.monthly;
+  const mLabel = ym => ym.slice(5).replace(/^0/, '') + '월';
+  let priceTrendText = '';
+  if (monthly.length >= 2) {
+    const firstM = monthly[0], lastM = monthly[monthly.length - 1];
+    const peakM = monthly.reduce((a, b) => b.평균kg당가격 > a.평균kg당가격 ? b : a, monthly[0]);
+    priceTrendText = (peakM === firstM || peakM === lastM)
+      ? `${mLabel(firstM.연월)} ${fmt(firstM.평균kg당가격)}원 → ${mLabel(lastM.연월)} ${fmt(lastM.평균kg당가격)}원`
+      : `${mLabel(firstM.연월)} ${fmt(firstM.평균kg당가격)}원 → ${mLabel(peakM.연월)} ${fmt(peakM.평균kg당가격)}원(최고점) → ${mLabel(lastM.연월)} ${fmt(lastM.평균kg당가격)}원`;
+  } else if (monthly.length === 1) {
+    priceTrendText = `${mLabel(monthly[0].연월)} ${fmt(monthly[0].평균kg당가격)}원`;
+  }
   document.getElementById('p1').innerHTML = `
   <div class="kpi-row">
     ${kpiCard('', 'doc', '총 거래건수', fmt(k.총거래건수)+' 건')}
@@ -2241,7 +2253,7 @@ function renderP1(){
     ${cardHead('warn','핵심 요약')}
     <div class="note" style="font-size:15px; line-height:1.9; color:var(--text);">
     · 2026년 1월~7월(7개월) 간 총 <b>26개 업체</b>에서 <b>${fmt(k.총거래건수)}건</b>, <b>${fmt(k.총두수)}두</b>, <b style="color:var(--navy);">${eok(k.총거래금액_원)}억원</b> 규모의 돼지 거래가격 조사가 이루어졌습니다.<br>
-    · 평균 kg당 거래단가는 <b style="color:var(--navy);">${fmt(k.평균kg당가격)}원</b>이며, <b>1월 4,022원 → 5월 4,946원(최고점) → 7월 4,690원</b>으로 상반기 중 뚜렷한 상승 후 조정 흐름을 보였습니다.<br>
+    · 평균 kg당 거래단가는 <b style="color:var(--navy);">${fmt(k.평균kg당가격)}원</b>${priceTrendText?`이며, <b>${priceTrendText}</b>의 흐름을 보였습니다.`:'입니다.'}<br>
     · 평균 도체율은 <b>${k.평균도체율}%</b>, 평균 지급률은 <b>${k.평균지급률}%</b>로 업계 통상 범위 내에서 안정적으로 유지되고 있습니다.
     </div>
     <div style="margin-top:12px; padding:12px 16px; background:#FBE7E6; border-left:4px solid var(--red); border-radius:8px; font-size:15px; line-height:1.7; color:var(--red); font-weight:700;">
@@ -2492,6 +2504,12 @@ function downloadOverviewTable(){
 // ================= P3 업체별 비교 =================
 function renderP3(){
   const sorted = [...DATA.company].sort((a,b)=>b.총거래금액-a.총거래금액);
+  const topVar = sorted.length ? [...sorted].sort((a,b)=>b.가격변동성-a.가격변동성)[0] : null;
+  const topPrice = sorted.length ? [...sorted].sort((a,b)=>b.평균kg당가격-a.평균kg당가격)[0] : null;
+  const relatedAnomaly = topVar ? DATA.data_quality.이상치목록
+    .filter(a => a.업체 === topVar.업체)
+    .sort((a,b)=>b.kg당가격-a.kg당가격)[0] : null;
+  const priceDiffPct = topPrice ? Math.round((topPrice.평균kg당가격 / DATA.kpi.평균kg당가격 - 1) * 100) : 0;
   document.getElementById('p3').innerHTML = `
   <div class="grid1">
     <div class="card">
@@ -2515,8 +2533,8 @@ function renderP3(){
   </div>
   <div class="card">
     ${cardHead('warn','업체별 단가 변동성 주의')}
-    <div class="note" style="font-size:13px;">· <b>(주)박달재엘피씨</b>는 단가 표준편차(σ)가 2,070원으로 타 업체 대비 현저히 높습니다. 이는 '데이터 품질·이상치' 메뉴에서 확인되는 이상 거래건(2026-03-17, 40,295원/kg) 1건의 영향이 큰 것으로 분석되며, 해당 건 정정 시 변동성이 크게 낮아질 것으로 예상됩니다.<br>
-    · <b>농협경제지주(주)부천축산물공판장</b>은 평균단가가 5,764원/kg으로 전체 평균(4,535원) 대비 27% 높아, 거래 특성(등급·품종 등) 확인이 필요합니다.</div>
+    <div class="note" style="font-size:13px;">${topVar?`· <b>${topVar.업체}</b>는 단가 표준편차(σ)가 ${fmt(topVar.가격변동성)}원으로 타 업체 대비 현저히 높습니다.${relatedAnomaly?` 이는 '데이터 품질·이상치' 메뉴에서 확인되는 이상 거래건(${relatedAnomaly.조사일자}, ${fmt(relatedAnomaly.kg당가격)}원/kg) 1건의 영향이 큰 것으로 분석되며, 해당 건 정정 시 변동성이 크게 낮아질 것으로 예상됩니다.`:' 상세 거래 내역 확인이 필요합니다.'}<br>`:''}
+    ${topPrice&&(!topVar||topPrice.업체!==topVar.업체)?`· <b>${topPrice.업체}</b>은 평균단가가 ${fmt(topPrice.평균kg당가격)}원/kg으로 전체 평균(${fmt(DATA.kpi.평균kg당가격)}원) 대비 ${priceDiffPct}% 높아, 거래 특성(등급·품종 등) 확인이 필요합니다.`:''}</div>
   </div>`;
 
   new Chart(document.getElementById('c_comp_amount'), {
@@ -2827,17 +2845,17 @@ function renderP7(){
   <div class="card">
     ${cardHead('warn','돼지 거래가격 정보 이상치')}
     <table class="tbl-center">
-      <thead><tr><th>업체명</th><th>조사일자</th><th>두수</th><th>생체중(kg)</th><th>총거래금액(원)</th><th>산출 kg당가격</th><th>추정 원인</th></tr></thead>
+      <thead><tr><th>업체명</th><th>조사일자</th><th>두수</th><th>생체중(kg)</th><th>총거래금액(원)</th><th>산출 kg당가격</th><th>추정 가능한 원인(참고용)</th></tr></thead>
       <tbody>
         ${dq.이상치목록.map(a=>`<tr>
           <td>${a.업체}</td><td>${a.조사일자}</td><td>${fmt(a.두수)}</td><td>${fmt(a.생체중)}</td><td>${fmt(a.총거래금액)}</td>
           <td><span class="badge red">${fmt(a.kg당가격)}원</span></td>
-          <td style="white-space:normal;">${a.kg당가격>9000?'총거래금액 자릿수 오류 추정 (÷10 시 약 '+fmt(a.kg당가격/10)+'원/kg으로 정상 범위 진입)':'생체중계 자릿수 오류 추정 (÷10 시 두당 약 '+fmt(a.생체중/10/a.두수)+'kg으로 정상 범위 진입)'}</td>
+          <td style="white-space:normal;">${a.kg당가격>9000?'총거래금액 자릿수 오류 가능성 (÷10 시 약 '+fmt(a.kg당가격/10)+'원/kg, 확인 필요)':'생체중계 자릿수 오류 가능성 (÷10 시 두당 약 '+fmt(a.생체중/10/a.두수)+'kg, 확인 필요)'}</td>
         </tr>`).join('')}
       </tbody>
     </table>
     <div style="margin-top:12px; padding:12px 16px; background:#FBE7E6; border-left:4px solid var(--red); border-radius:8px; font-size:15px; line-height:1.8; color:var(--text); font-weight:700;">
-    ⚠ 총 <u>${dq.이상치건수}건</u>의 단가 이상치가 확인되었습니다. 두 건 모두 두수 대비 생체중 또는 거래금액의 자릿수가 어긋난 <u>입력 단계 오류</u>로 추정되며, 원본 데이터 재확인 및 정정이 필요합니다. 이러한 이상치는 월별·업체별 평균단가 및 변동성 지표를 왜곡시키므로 <u>우선 정정 대상</u>입니다.
+    ⚠ 총 <u>${dq.이상치건수}건</u>의 단가 이상치가 확인되었습니다. 두수 대비 생체중 또는 거래금액의 자릿수가 어긋난 <u>입력 단계 오류일 가능성</u>이 있는 패턴이나, 이는 시스템이 계산한 참고용 추정이며 실제 원인은 원본 데이터 재확인을 통해서만 확정할 수 있습니다. 이러한 이상치는 월별·업체별 평균단가 및 변동성 지표를 왜곡시키므로 <u>우선 확인 대상</u>입니다.
     </div>
   </div>
   <div class="card">
@@ -2872,8 +2890,6 @@ function renderP7(){
 }
 
 // ================= P8 업체용 종합현황 =================
-// 실제 서비스에서는 로그인한 업체 계정 정보로 결정되어야 하나, 이 프로토타입에서는 시연을 위해 고정값을 사용한다.
-const MY_COMPANY = '도드람LPC공사';
 const bizCharts = {}; // canvas id -> Chart 인스턴스
 function destroyBizChart(canvasId){
   const inst = bizCharts[canvasId];
@@ -3124,37 +3140,19 @@ function renderP8(){
 // 상단 조회 필터(지역/업체/기간)는 activatePage()에서 이 페이지일 때만 숨긴다 — p9는 필터와 무관하게
 // 항상 현재 로드된 엑셀 전체(등록된 날짜 범위 전부)를 대상으로 집계한다.
 function downloadTableToExcel(tableId, filename) {
+  if (typeof XLSX === 'undefined') { alert('\uc5d1\uc140 \ub2e4\uc6b4\ub85c\ub4dc \uae30\ub2a5\uc744 \uc0ac\uc6a9\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4 (xlsx \ub77c\uc774\ube0c\ub7ec\ub9ac \ub85c\ub4dc \uc2e4\ud328).'); return; }
   const table = document.getElementById(tableId);
   if (!table) return;
-  
-  let csv = [];
-  const rows = table.querySelectorAll("tr");
-  
-  for (let i = 0; i < rows.length; i++) {
-    let row = [];
-    const cols = rows[i].querySelectorAll("td, th");
-    for (let j = 0; j < cols.length; j++) {
-      let data = cols[j].innerText.replace(/(\r\n|\n|\r)/gm, "").replace(/(\s\s+)/gm, " ");
-      if (data.includes(",")) {
-        data = '"' + data.replace(/"/g, '""') + '"';
-      }
-      row.push(data);
-    }
-    csv.push(row.join(","));
-  }
-  const csvString = "\ufeff" + csv.join("\n");
-  
-  const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" });
-  const link = document.createElement("a");
-  if (link.download !== undefined) {
-    const url = URL.createObjectURL(blob);
-    link.setAttribute("href", url);
-    link.setAttribute("download", (filename || tableId) + ".csv");
-    link.style.visibility = "hidden";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }
+
+  const aoa = [...table.querySelectorAll('tr')].map(row =>
+    [...row.querySelectorAll('td, th')].map(cell =>
+      cell.innerText.replace(/(\r\n|\n|\r)/gm, '').replace(/(\s\s+)/gm, ' ')
+    )
+  );
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, (filename || tableId).slice(0, 31));
+  XLSX.writeFile(wb, `${filename || tableId}.xlsx`);
 }
 
 function lrBuildTable(elId, headers, rows){
@@ -4352,102 +4350,6 @@ document.getElementById('btnApplyFilter').addEventListener('click', function() {
 // 지역을 바꾸면 업체 목록도 그 지역 소속 업체로 다시 좁혀서 채운다
 // (선택 안 한 지역의 업체를 고르면 결과가 항상 0건이 되는 걸 방지)
 document.getElementById('filterRegion').addEventListener('change', populateCompanyFilter);
-
-async function fetchAndParseExcel(url) {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-  const arrayBuffer = await response.arrayBuffer();
-  const data = new Uint8Array(arrayBuffer);
-  const workbook = XLSX.read(data, {type: 'array'});
-  const sheetName = workbook.SheetNames[0];
-  const worksheet = workbook.Sheets[sheetName];
-  return XLSX.utils.sheet_to_json(worksheet, {header: 1});
-}
-
-async function loadServerExcelData() {
-  const overlay = document.getElementById('loadingOverlay');
-  const txtPrice = document.getElementById('textPriceExcel');
-  const lblPrice = document.getElementById('labelPriceExcel');
-  const txtCompany = document.getElementById('textCompanyExcel');
-  const lblCompany = document.getElementById('labelCompanyExcel');
-  
-  if (overlay) overlay.classList.remove('hidden');
-
-  try {
-    const priceUrl = '돼지 거래가격정보(202601~202607.xlsx';
-    const companyUrl = '업체정보(202601~202607.xlsx';
-
-    const [priceRows, companyRows] = await Promise.all([
-      fetchAndParseExcel(priceUrl),
-      fetchAndParseExcel(companyUrl)
-    ]);
-
-    excelPriceRows = priceRows;
-    excelCompanyRows = companyRows;
-
-    if (txtPrice) txtPrice.textContent = "1. 가격정보 완료 (🟢)";
-    if (lblPrice) lblPrice.classList.add('loaded');
-    if (txtCompany) txtCompany.textContent = "2. 업체정보 완료 (🟢)";
-    if (lblCompany) lblCompany.classList.add('loaded');
-
-    initFilterRange();
-
-    const start = document.getElementById('filterStartDate').value;
-    const end = document.getElementById('filterEndDate').value;
-    const region = document.getElementById('filterRegion').value;
-    const company = document.getElementById('filterCompany').value;
-    processDashboardData(start, end, region, company);
-
-  } catch (error) {
-    console.warn('Failed to load excel files from server. Falling back to local storage or embedded data.', error);
-    loadLocalOrEmbeddedData();
-  } finally {
-    if (overlay) {
-      setTimeout(() => {
-        overlay.classList.add('hidden');
-      }, 500);
-    }
-  }
-}
-
-function loadLocalOrEmbeddedData() {
-  const savedPriceStr = localStorage.getItem('excel_price_rows');
-  const savedCompStr = localStorage.getItem('excel_company_rows');
-  
-  if (savedPriceStr && savedCompStr) {
-    try {
-      excelPriceRows = JSON.parse(savedPriceStr);
-      excelCompanyRows = sanitizeCompanyRows(JSON.parse(savedCompStr));
-      
-      if (localStorage.getItem('price_excel_loaded') === 'true') {
-        const txt = document.getElementById('textPriceExcel');
-        const lbl = document.getElementById('labelPriceExcel');
-        if (txt) txt.textContent = "1. 가격정보 완료 (🟢)";
-        if (lbl) lbl.classList.add('loaded');
-      }
-      if (localStorage.getItem('company_excel_loaded') === 'true') {
-        const txt = document.getElementById('textCompanyExcel');
-        const lbl = document.getElementById('labelCompanyExcel');
-        if (txt) txt.textContent = "2. 업체정보 완료 (🟢)";
-        if (lbl) lbl.classList.add('loaded');
-      }
-      
-      initFilterRange();
-
-      const start = document.getElementById('filterStartDate').value;
-      const end = document.getElementById('filterEndDate').value;
-      const region = document.getElementById('filterRegion').value;
-      const company = document.getElementById('filterCompany').value;
-      processDashboardData(start, end, region, company);
-
-    } catch(e) {
-      console.error('Failed to parse saved excel data', e);
-      loadEmbeddedOnly();
-    }
-  } else {
-    loadEmbeddedOnly();
-  }
-}
 
 function loadEmbeddedOnly() {
   try {
