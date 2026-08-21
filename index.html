@@ -1187,20 +1187,10 @@ function initFilterRange() {
     endInput.max = range.max;
   }
   
-  const savedStart = localStorage.getItem('search_start_date');
-  const savedEnd = localStorage.getItem('search_end_date');
-  
-  if (savedStart && savedStart >= range.min && savedStart <= range.max) {
-    startInput.value = savedStart;
-  } else {
-    startInput.value = range.min;
-  }
-  
-  if (savedEnd && savedEnd >= range.min && savedEnd <= range.max) {
-    endInput.value = savedEnd;
-  } else {
-    endInput.value = range.max;
-  }
+  // 검색기간 기본값은 항상 데이터가 있는 전체 구간이다. 브라우저에 예전 검색값이 남아있어도
+  // (특히 원본 엑셀이 새로 갱신된 경우) 그 값으로 좁혀서 보여주지 않는다.
+  startInput.value = range.min;
+  endInput.value = range.max;
 }
 
 // 엑셀 통계 집계 연산
@@ -4689,9 +4679,8 @@ document.getElementById('btnApplyFilter').addEventListener('click', function() {
     return;
   }
 
-  // 검색 상태 로컬 스토리지 보관
-  localStorage.setItem('search_start_date', start);
-  localStorage.setItem('search_end_date', end);
+  // 검색기간(시작일/종료일)은 저장하지 않는다 — 항상 데이터 전체 구간을 기본값으로 보여준다.
+  // 권역 선택만 편의상 기억해둔다.
   localStorage.setItem('search_region', region);
 
   // 업체 상세 분석(p8)은 별도 집계이므로 관리자용 DATA 재가공과 무관하게
