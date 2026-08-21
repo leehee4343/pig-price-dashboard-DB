@@ -982,23 +982,31 @@ function getSundayDateString(dateStr) {
 }
 
 // 등록일자의 전체 최소/최대 날짜 범위를 구하는 헬퍼
+// 조회 기간 필터는 등록일자를 기준으로 걸러내지만(processDashboardData 참고), 등록일자는
+// 실제 거래(조사)가 일어난 뒤 며칠~몇 달 늦게 입력되는 경우가 많아 등록일자만으로 범위를
+// 잡으면 조사일자 기준으로는 더 이른 데이터가 있는데도 검색창 기본값이 그 앞부분을 안 보여주는
+// 것처럼 보인다(실제로 걸러지진 않지만 시작일 기본값이 조사기간 시작일보다 늦어 보임).
+// 검색기간 기본값이 "데이터가 있는 구간 전체"를 확실히 덮도록 조사일자·등록일자 중 더 이른/늦은
+// 값을 range로 잡는다.
 function getExcelRegistrationDateRange() {
   if (!excelPriceRows || excelPriceRows.length < 4) return { min: '', max: '' };
   let minDate = '9999-12-31';
   let maxDate = '0000-01-01';
-  
+
   for (let i = 3; i < excelPriceRows.length; i++) {
     const r = excelPriceRows[i];
     if (!r || r.length < 2) continue;
-    let regDateStr = r[1]; // 조사일자 폴백
+    const surveyDateStr = r[1];
+    let regDateStr = surveyDateStr;
     if (r[16]) {
       const match = String(r[16]).match(/^(\d{4}-\d{2}-\d{2})/);
       if (match) regDateStr = match[1];
     }
-    if (regDateStr) {
-      if (regDateStr < minDate) minDate = regDateStr;
-      if (regDateStr > maxDate) maxDate = regDateStr;
-    }
+    [surveyDateStr, regDateStr].forEach(d => {
+      if (!d) return;
+      if (d < minDate) minDate = d;
+      if (d > maxDate) maxDate = d;
+    });
   }
   return { min: minDate, max: maxDate };
 }
