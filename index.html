@@ -2927,6 +2927,8 @@ function renderP10(){
   const avgCount = totalCompanies ? combined.reduce((s,d)=>s+d.등록횟수,0)/totalCompanies : 0;
   const avgDays = totalCompanies ? combined.reduce((s,d)=>s+d.거래일수,0)/totalCompanies : 0;
   const zeroCount = combined.filter(d=>d.등록횟수===0).length;
+  const byCount = [...combined].sort((a,b)=>b.등록횟수-a.등록횟수);
+  const byDays = [...combined].sort((a,b)=>b.거래일수-a.거래일수);
 
   document.getElementById('p10').innerHTML = `
   <div class="kpi-row">
@@ -2937,8 +2939,14 @@ function renderP10(){
   </div>
   <div class="grid1">
     <div class="card">
-      ${cardHead('barchart',`업체별 등록 횟수 및 거래일 횟수 (전체 ${totalCompanies}개사, 등록횟수순)`)}
-      <div class="chart-wrap" style="height:520px;"><canvas id="c_reg_status"></canvas></div>
+      ${cardHead('barchart',`업체별 등록 횟수 (전체 ${totalCompanies}개사, 등록횟수순)`)}
+      <div class="chart-wrap" style="height:520px;"><canvas id="c_reg_count"></canvas></div>
+    </div>
+  </div>
+  <div class="grid1">
+    <div class="card">
+      ${cardHead('barchart',`업체별 거래일 횟수 (전체 ${totalCompanies}개사, 거래일횟수순)`)}
+      <div class="chart-wrap" style="height:520px;"><canvas id="c_reg_days"></canvas></div>
     </div>
   </div>
   <div class="grid1">
@@ -2961,16 +2969,22 @@ function renderP10(){
     <div class="note" style="font-size:13px;">· 조사기간 동안 거래가격을 한 건도 등록하지 않은 업체가 <b style="color:var(--red);">${zeroCount}개사</b> 있습니다. 상세 사유는 <a href="#" onclick="document.querySelector('.nav-item[data-page=p7]').click(); return false;" style="color:var(--navy); text-decoration:underline;">'데이터 품질·이상치' 메뉴</a>에서 확인할 수 있습니다.</div>
   </div>`:''}`;
 
-  new Chart(document.getElementById('c_reg_status'), {
+  new Chart(document.getElementById('c_reg_count'), {
     type:'bar',
-    data:{ labels: combined.map(d=>truncLabel(d.업체)),
-      datasets:[
-        {label:'등록한 횟수', data: combined.map(d=>d.등록횟수), backgroundColor:CH.navy, borderRadius:3, maxBarThickness:18},
-        {label:'거래일 횟수', data: combined.map(d=>d.거래일수), backgroundColor:CH.accent, borderRadius:3, maxBarThickness:18}
-      ]},
+    data:{ labels: byCount.map(d=>truncLabel(d.업체)),
+      datasets:[{label:'등록한 횟수', data: byCount.map(d=>d.등록횟수), backgroundColor:CH.navy, borderRadius:3, maxBarThickness:18}]},
     options:{indexAxis:'y', responsive:true, maintainAspectRatio:false,
-      scales:{ x:{ title:{display:true,text:'건 / 일'} } },
-      plugins:{legend:{position:'bottom'}, tooltip:{callbacks:{title:items=>combined[items[0].dataIndex].업체}}} }
+      scales:{ x:{ title:{display:true,text:'건'} } },
+      plugins:{legend:{display:false}, tooltip:{callbacks:{title:items=>byCount[items[0].dataIndex].업체}}} }
+  });
+
+  new Chart(document.getElementById('c_reg_days'), {
+    type:'bar',
+    data:{ labels: byDays.map(d=>truncLabel(d.업체)),
+      datasets:[{label:'거래일 횟수', data: byDays.map(d=>d.거래일수), backgroundColor:CH.accent, borderRadius:3, maxBarThickness:18}]},
+    options:{indexAxis:'y', responsive:true, maintainAspectRatio:false,
+      scales:{ x:{ title:{display:true,text:'일'} } },
+      plugins:{legend:{display:false}, tooltip:{callbacks:{title:items=>byDays[items[0].dataIndex].업체}}} }
   });
 }
 
