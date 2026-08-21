@@ -2921,7 +2921,93 @@ function buildRegistrationStatusList(){
   return [...registered, ...zeroCompanies].sort((a,b)=>b.등록횟수-a.등록횟수);
 }
 
+let regStatusGranularity = '월';
+const p10Charts = {}; // canvas id -> Chart 인스턴스
+function destroyP10Chart(canvasId){
+  const inst = p10Charts[canvasId];
+  if (inst) {
+    try { inst.destroy(); } catch(e) {}
+    activeCharts = activeCharts.filter(c => c !== inst);
+    delete p10Charts[canvasId];
+  }
+}
+function regStatusPeriodToggleHtml(){
+  return `
+    <div class="period-toggle">
+      <button type="button" class="period-toggle-btn ${regStatusGranularity==='월'?'active':''}" onclick="setRegStatusGranularity('월')">월</button>
+      <button type="button" class="period-toggle-btn ${regStatusGranularity==='주'?'active':''}" onclick="setRegStatusGranularity('주')">주</button>
+      <button type="button" class="period-toggle-btn ${regStatusGranularity==='일'?'active':''}" onclick="setRegStatusGranularity('일')">일</button>
+    </div>
+  `;
+}
+function setRegStatusGranularity(g){
+  regStatusGranularity = g;
+  renderP10();
+}
+
+// 선택한 업체 1개에 대해서만 월/주/일 단위로 등록 횟수·거래일 횟수를 다시 집계한다.
+// (일 단위 구간에서는 그 구간 안의 조사일자가 하나뿐이라 거래일수가 항상 0 또는 1이 된다)
+function computeCompanyRegTrend(companyName, startDate, endDate){
+  const rows = [];
+  for (let i = 3; i < excelPriceRows.length; i++) {
+    const r = excelPriceRows[i];
+    if (!r || r.length < 2) continue;
+    const company = r[0];
+    const dateStr = r[1];
+    if (!company || !dateStr) continue;
+    if (company !== companyName) continue;
+
+    let regDate = dateStr;
+    if (r[16]) {
+      const m = String(r[16]).match(/^(\d{4}-\d{2}-\d{2})/);
+      if (m) regDate = m[1];
+    }
+    if (startDate && regDate < startDate) continue;
+    if (endDate && regDate > endDate) continue;
+
+    rows.push({ date: dateStr });
+  }
+  rows.sort((a,b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+
+  const monthlyGroup = {}, weeklyGroup = {}, dailyGroup = {};
+  rows.forEach(r => {
+    const ym = r.date.substring(0,7);
+    if (!monthlyGroup[ym]) monthlyGroup[ym] = { ym, count:0, dateSet:new Set() };
+    monthlyGroup[ym].count++; monthlyGroup[ym].dateSet.add(r.date);
+
+    const sunStr = getSundayDateString(r.date);
+    if (!weeklyGroup[sunStr]) weeklyGroup[sunStr] = { week:sunStr, count:0, dateSet:new Set() };
+    weeklyGroup[sunStr].count++; weeklyGroup[sunStr].dateSet.add(r.date);
+
+    if (!dailyGroup[r.date]) dailyGroup[r.date] = { day:r.date, count:0, dateSet:new Set() };
+    dailyGroup[r.date].count++; dailyGroup[r.date].dateSet.add(r.date);
+  });
+
+  const monthly = Object.keys(monthlyGroup).sort().map(ym => ({ 연월: ym, 등록횟수: monthlyGroup[ym].count, 거래일수: monthlyGroup[ym].dateSet.size }));
+  const weekly = Object.values(weeklyGroup).sort((a,b)=>a.week.localeCompare(b.week)).map(g => ({ 주: g.week, 등록횟수: g.count, 거래일수: g.dateSet.size }));
+  const daily = Object.values(dailyGroup).sort((a,b)=>a.day.localeCompare(b.day)).map(g => ({ 일자: g.day, 등록횟수: g.count, 거래일수: g.dateSet.size }));
+  const totalDays = new Set(rows.map(r=>r.date)).size;
+
+  return {
+    monthly, weekly, daily,
+    totalCount: rows.length,
+    totalDays,
+    firstDate: rows.length ? rows[0].date : '',
+    lastDate: rows.length ? rows[rows.length - 1].date : ''
+  };
+}
+
+// 상단 검색바에서 업체를 선택했는지에 따라 전체 업체 개요 / 단일 업체 월·주·일 추이로 분기한다.
 function renderP10(){
+  const targetCompany = getBizTargetCompany();
+  if (targetCompany) {
+    renderP10CompanyTrend(targetCompany);
+  } else {
+    renderP10Overview();
+  }
+}
+
+function renderP10Overview(){
   const combined = buildRegistrationStatusList();
   const totalCompanies = combined.length;
   const avgCount = totalCompanies ? combined.reduce((s,d)=>s+d.등록횟수,0)/totalCompanies : 0;
@@ -2931,6 +3017,7 @@ function renderP10(){
   const byDays = [...combined].sort((a,b)=>b.거래일수-a.거래일수);
 
   document.getElementById('p10').innerHTML = `
+  <div style="margin-bottom:14px; padding:10px 16px; background:#EDF5FB; border-left:4px solid var(--navy2); border-radius:8px; font-size:13px; color:var(--navy);">전체 업체 기준 현황입니다. 상단 검색바에서 특정 업체를 선택하면 그 업체의 월/주/일별 등록 현황 추이를 볼 수 있습니다.</div>
   <div class="kpi-row">
     ${kpiCard('', 'building', '조사대상 업체 수', totalCompanies+' 개사')}
     ${kpiCard('', 'doc', '업체당 평균 등록횟수', fmt(Math.round(avgCount))+' 건')}
@@ -2986,6 +3073,92 @@ function renderP10(){
       scales:{ x:{ title:{display:true,text:'일'} } },
       plugins:{legend:{display:false}, tooltip:{callbacks:{title:items=>byDays[items[0].dataIndex].업체}}} }
   });
+}
+
+function renderP10CompanyTrend(companyName){
+  const { start, end } = getBizFilterDates();
+  const trend = computeCompanyRegTrend(companyName, start, end);
+  const el = document.getElementById('p10');
+
+  if (trend.totalCount === 0) {
+    el.innerHTML = `<div class="card"><div class="note">선택하신 조회기간에 해당하는 등록 데이터가 없습니다. 조회기간을 다시 확인해 주세요.</div></div>`;
+    return;
+  }
+
+  const gran = regStatusGranularity;
+  const src = gran === '일' ? trend.daily : gran === '주' ? trend.weekly : trend.monthly;
+  const labelKey = gran === '일' ? '일자' : gran === '주' ? '주' : '연월';
+  const labels = src.map(d => gran === '주' ? formatWeekLabel(d[labelKey]) : d[labelKey]);
+  const avgPerDay = trend.totalDays > 0 ? trend.totalCount / trend.totalDays : 0;
+
+  el.innerHTML = `
+  <div style="margin-bottom:14px; padding:10px 16px; background:#EDF5FB; border-left:4px solid var(--navy2); border-radius:8px; font-size:13px; color:var(--navy);">현재 <b>${companyName}</b>의 등록 현황을 표시합니다. 전체 업체 현황을 보려면 상단 검색바에서 업체 선택을 해제(전체 업체)하고 조회해 주세요.</div>
+  <div class="kpi-row">
+    ${kpiCard('', 'doc', '총 등록 횟수', fmt(trend.totalCount)+' 건')}
+    ${kpiCard('', 'calendar', '총 거래일 횟수', fmt(trend.totalDays)+' 일')}
+    ${kpiCard('', 'scale', '거래일당 평균 등록건수', avgPerDay.toFixed(1)+' 건')}
+    ${kpiCard('', 'building', '조회기간', trend.firstDate+' ~ '+trend.lastDate)}
+  </div>
+  <div class="grid1">
+    <div class="card">
+      ${cardHead('barchart','등록 횟수 추이', regStatusPeriodToggleHtml())}
+      <div class="chart-wrap chart-wrap-scroll" style="height:280px;"><div class="chart-scroll-inner" id="regCountTrendInner"><canvas id="c_reg_trend_count"></canvas></div></div>
+    </div>
+  </div>
+  <div class="grid1">
+    <div class="card">
+      ${cardHead('calendar','거래일 횟수 추이', regStatusPeriodToggleHtml())}
+      <div class="chart-wrap chart-wrap-scroll" style="height:280px;"><div class="chart-scroll-inner" id="regDaysTrendInner"><canvas id="c_reg_trend_days"></canvas></div></div>
+    </div>
+  </div>
+  <div class="grid1">
+    <div class="card">
+      ${cardHead('doc',`${companyName} 등록 현황 상세 (${gran}별)`, downloadButtonHtml('downloadRegistrationTrendTable'))}
+      <div class="table-scroll" style="max-height:420px;"><table>
+        <thead><tr><th>구분</th><th>등록한 횟수</th><th>거래일 횟수</th></tr></thead>
+        <tbody>${src.map((d,i)=>`<tr><td>${labels[i]}</td><td>${fmt(d.등록횟수)}</td><td>${fmt(d.거래일수)}</td></tr>`).join('')}</tbody>
+      </table></div>
+    </div>
+  </div>`;
+
+  destroyP10Chart('c_reg_trend_count');
+  fitScrollWidth('c_reg_trend_count', 'regCountTrendInner', src.length, gran);
+  p10Charts['c_reg_trend_count'] = new Chart(document.getElementById('c_reg_trend_count'), {
+    type:'bar',
+    data:{ labels, datasets:[{label:'등록한 횟수', data: src.map(d=>d.등록횟수), backgroundColor:CH.navy, borderRadius:4, maxBarThickness:40}] },
+    options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}} }
+  });
+
+  destroyP10Chart('c_reg_trend_days');
+  fitScrollWidth('c_reg_trend_days', 'regDaysTrendInner', src.length, gran);
+  p10Charts['c_reg_trend_days'] = new Chart(document.getElementById('c_reg_trend_days'), {
+    type:'bar',
+    data:{ labels, datasets:[{label:'거래일 횟수', data: src.map(d=>d.거래일수), backgroundColor:CH.accent, borderRadius:4, maxBarThickness:40}] },
+    options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}} }
+  });
+}
+
+// 선택된 업체의 현재 월/주/일 보기 표를 화면에 보이는 그대로 엑셀로 내려받는다.
+function downloadRegistrationTrendTable(){
+  if (typeof XLSX === 'undefined') { alert('엑셀 다운로드 기능을 사용할 수 없습니다 (xlsx 라이브러리 로드 실패).'); return; }
+  const companyName = getBizTargetCompany();
+  if (!companyName) { alert('다운로드할 데이터가 없습니다.'); return; }
+  const { start, end } = getBizFilterDates();
+  const trend = computeCompanyRegTrend(companyName, start, end);
+  const gran = regStatusGranularity;
+  const src = gran === '일' ? trend.daily : gran === '주' ? trend.weekly : trend.monthly;
+  const labelKey = gran === '일' ? '일자' : gran === '주' ? '주' : '연월';
+  if (!src.length) { alert('다운로드할 데이터가 없습니다.'); return; }
+  const rows = src.map(d => ({
+    '구분': gran === '주' ? formatWeekLabel(d[labelKey]) : d[labelKey],
+    '등록한 횟수': d.등록횟수,
+    '거래일 횟수': d.거래일수
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, `${companyName}_등록현황`.slice(0, 31));
+  const today = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(wb, `돼지거래_${companyName}_등록현황_${today}.xlsx`);
 }
 
 // "업체별 등록 현황" 표를 화면에 보이는 그대로(등록횟수 순 정렬) 엑셀로 내려받는다.
