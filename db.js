@@ -82,7 +82,9 @@ function dbAll(query, params = []) {
 function dbRun(query, params = []) {
   if (!db) throw new Error('Database is not initialized. Call initDb() first.');
   db.run(query, params);
-  saveDb();
+  // 주의: 여기서 saveDb()(db.export())를 매번 호출하면 sql.js에서 진행 중인
+  // BEGIN/COMMIT 트랜잭션이 끊겨 "no transaction is active" 에러가 난다.
+  // 저장은 호출부(트랜잭션 완료 후)에서 명시적으로 saveDb()를 호출해 처리한다.
   return Promise.resolve({ lastID: 0 }); // lastID는 특별히 안 써도 되므로 mock
 }
 

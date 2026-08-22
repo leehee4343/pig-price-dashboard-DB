@@ -93,7 +93,7 @@ async function importCompanyData(buffer) {
     }
     await dbRun("COMMIT");
   } catch (err) {
-    await dbRun("ROLLBACK");
+    try { await dbRun("ROLLBACK"); } catch (rollbackErr) { console.error('Rollback failed:', rollbackErr); }
     throw err;
   }
   saveDb();
@@ -167,7 +167,7 @@ async function importPriceData(buffer) {
     }
     await dbRun("COMMIT");
   } catch (err) {
-    await dbRun("ROLLBACK");
+    try { await dbRun("ROLLBACK"); } catch (rollbackErr) { console.error('Rollback failed:', rollbackErr); }
     throw err;
   }
   saveDb();
@@ -838,18 +838,18 @@ app.get('/api/company-reg-trend', async (req, res) => {
       monthly[m].dateSet.add(d);
     });
 
-    const formatList = (obj, labelKey, type) => {
+    const formatList = (obj, labelKey, outKey) => {
       return Object.values(obj).map(v => ({
-        "구간": v[labelKey],
+        [outKey]: v[labelKey],
         "등록횟수": v.count,
         "거래일수": v.dateSet.size
-      })).sort((a,b) => a.구간.localeCompare(b.구간));
+      })).sort((a,b) => a[outKey].localeCompare(b[outKey]));
     };
 
     res.json({
-      daily: formatList(daily, 'date', 'day'),
-      weekly: formatList(weekly, 'week', 'week'),
-      monthly: formatList(monthly, 'month', 'month')
+      daily: formatList(daily, 'date', '일자'),
+      weekly: formatList(weekly, 'week', '주'),
+      monthly: formatList(monthly, 'month', '연월')
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

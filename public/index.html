@@ -2389,6 +2389,10 @@ function buildRegistrationStatusList(){
 }
 
 let regStatusGranularity = '월';
+// 서버 API(/api/company-reg-trend)로 최근에 조회한 결과. 다운로드 버튼이
+// 원본 엑셀을 다시 파싱하지 않고 화면에 표시된 데이터를 그대로 내려받도록 캐시해 둔다.
+let p11LastTrend = null;
+let p11LastCompany = '';
 const p11Charts = {}; // canvas id -> Chart 인스턴스
 function destroyP11Chart(canvasId){
   const inst = p11Charts[canvasId];
@@ -2565,11 +2569,13 @@ async function renderP11(){
       return;
     }
     const trend = await res.json();
-    
+    p11LastTrend = trend;
+    p11LastCompany = companyName;
+
     // 트렌드 통계 집계
     const gran = regStatusGranularity;
     const src = gran === '일' ? trend.daily : gran === '주' ? trend.weekly : trend.monthly;
-    
+
     const totalCount = src.reduce((sum, d) => sum + d.등록횟수, 0);
     const totalDays = src.reduce((sum, d) => sum + d.거래일수, 0);
 
@@ -2636,11 +2642,9 @@ async function renderP11(){
 function downloadRegistrationTrendTable(){
   if (typeof XLSX === 'undefined') { alert('엑셀 다운로드 기능을 사용할 수 없습니다 (xlsx 라이브러리 로드 실패).'); return; }
   const companyName = getBizTargetCompany();
-  if (!companyName) { alert('다운로드할 데이터가 없습니다.'); return; }
-  const { start, end } = getBizFilterDates();
-  const trend = computeCompanyRegTrend(companyName, start, end);
+  if (!companyName || !p11LastTrend || p11LastCompany !== companyName) { alert('다운로드할 데이터가 없습니다.'); return; }
   const gran = regStatusGranularity;
-  const src = gran === '일' ? trend.daily : gran === '주' ? trend.weekly : trend.monthly;
+  const src = gran === '일' ? p11LastTrend.daily : gran === '주' ? p11LastTrend.weekly : p11LastTrend.monthly;
   const labelKey = gran === '일' ? '일자' : gran === '주' ? '주' : '연월';
   if (!src.length) { alert('다운로드할 데이터가 없습니다.'); return; }
   const rows = src.map(d => ({
@@ -2773,8 +2777,8 @@ async function renderP8(){
     </div>
     <div class="kpi-row">
       ${kpiCard('', 'yield', '평균 도체율', biz.도체율+' %')}
-      ${kpiCard(rateAvailable?'':'orange', 'percentage', '평균 지급률', rateAvailable ? (biz.평균지급률+' %') : '미기재(등급별)')}
-      ${kpiCard(hasAnomaly?'orange':'', 'warning', '데이터 품질 경고', hasAnomaly ? '이상 가격 감지' : '이상 없음')}
+      ${kpiCard(rateAvailable?'':'orange', 'rate', '평균 지급률', rateAvailable ? (biz.평균지급률+' %') : '미기재(등급별)')}
+      ${kpiCard(hasAnomaly?'orange':'', 'warn', '데이터 품질 경고', hasAnomaly ? '이상 가격 감지' : '이상 없음')}
     </div>
     <div class="grid1">
       <div class="card">
@@ -3751,7 +3755,7 @@ const HASH_PAGE = Object.fromEntries(Object.entries(PAGE_HASH).map(([pid, h]) =>
 
 // 메뉴 클릭·URL 해시 변경(뒤로/앞으로가기 포함) 양쪽에서 공통으로 쓰는 페이지 전환 함수.
 // updateHash=true일 때만(=사용자가 직접 메뉴를 클릭했을 때만) 새 히스토리 항목을 쌓는다.
-function activatePage(pid, updateHash){
+async function activatePage(pid, updateHash){
   if (!titles[pid]) pid = 'p1';
   const previousNavItem = document.querySelector('.nav-item.active');
   const previousPid = previousNavItem ? previousNavItem.dataset.page : '';
@@ -3783,7 +3787,7 @@ function activatePage(pid, updateHash){
     const start = document.getElementById('filterStartDate').value;
     const end = document.getElementById('filterEndDate').value;
     const region = document.getElementById('filterRegion').value;
-    if (processDashboardData(start, end, region, '')) rendered = {};
+    if (await fetchDashboardData(start, end, region, '')) rendered = {};
   }
 
   document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.page === pid));
@@ -4085,9 +4089,12 @@ async function loadEmbeddedOnly() {
 setChartDefaults();
 // 배포 서버의 원본 Excel을 자동 다운로드하지 않는다. 공개 정적 경로에 놓인 원본에는
 // 개인정보·API 키가 포함될 수 있으므로, 공개 필드만 담은 내장 데이터로 시작한다.
-loadEmbeddedOnly();
-activatePage(HASH_PAGE[location.hash.replace('#', '')] || 'p1', false);
-updateTopbarFooter(document.querySelector('.nav-item.active').dataset.page);
+// DATA가 서버에서 채워지기 전에 activatePage()가 렌더링을 시도하면 DATA.monthly 등이
+// undefined라 에러가 나므로, 최초 데이터 로드가 끝난 뒤에 페이지를 활성화한다.
+loadEmbeddedOnly().then(() => {
+  activatePage(HASH_PAGE[location.hash.replace('#', '')] || 'p1', false);
+  updateTopbarFooter(document.querySelector('.nav-item.active').dataset.page);
+});
 
 </script>
 </body>
