@@ -1,0 +1,18 @@
+돼지 거래가격정보 통계 분석 대시보드
+========================================================
+
+▶ 서비스 URL
+https://leehee4343.github.io/pig-price-dashboard-DB/
+
+▶ GitHub 레파지토리
+https://github.com/leehee4343/pig-price-dashboard-DB
+
+▶ 배포일
+2026-08-22
+
+▶ 참고
+- GitHub Pages 첫 빌드는 수 분 소요될 수 있습니다.
+- Supabase 연동: public/config/supabase.config.js 에 URL 및 Anon Key 설정 (WBS 프로젝트와 같은 Supabase 프로젝트를 pig_ 접두어 테이블로 공유)
+- 테이블 생성: sql/supabase_setup.sql 실행 (Supabase SQL Editor)
+- 데이터 업로드: 사이트 좌측 "데이터 원천 엑셀 업로드"에서 가격정보/업체정보 엑셀을 올리면 즉시 반영되며, 매번 이전 데이터를 지우고 새로 채웁니다(이력 관리 없음).
+- 현재는 업로드에 비밀번호가 걸려 있지 않습니다(누구나 업로드 가능, 추후 잠금 예정).

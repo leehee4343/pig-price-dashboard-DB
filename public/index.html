@@ -760,6 +760,83 @@ tbody tr:hover { background: var(--bg); }
 @keyframes loading-spin {
   to { transform: rotate(360deg); }
 }
+.auth-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--navy);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  transition: opacity 0.25s ease, visibility 0.25s ease;
+}
+.auth-overlay.hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.auth-box {
+  width: 320px;
+  max-width: 90vw;
+  background: var(--card);
+  border-radius: var(--r-md, 12px);
+  padding: 32px 28px;
+  text-align: center;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.3);
+  font-family: 'Noto Sans KR', sans-serif;
+}
+.auth-box h2 {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--navy);
+}
+.auth-box p {
+  margin: 0 0 20px;
+  font-size: 13px;
+  color: var(--text-sub);
+}
+.auth-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font-size: 14px;
+  text-align: center;
+  letter-spacing: 2px;
+  outline: none;
+  margin-bottom: 10px;
+  font-family: inherit;
+}
+.auth-input:focus {
+  border-color: var(--navy2);
+  box-shadow: 0 0 0 3px rgba(37, 110, 159, 0.15);
+}
+.auth-btn {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--navy2);
+  color: #fff;
+  border: none;
+  border-radius: var(--r-sm);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.auth-btn:hover {
+  background: var(--navy);
+}
+.auth-error {
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: #C0392B;
+  min-height: 16px;
+}
 
 /* ================= 기존 보고용 통계 (레거시 리포트, P9) ================= */
 .legacy-report .section { margin-bottom: 34px; scroll-margin-top: 20px; }
@@ -778,7 +855,17 @@ tbody tr:hover { background: var(--bg); }
 </head>
 <body>
 
-<div class="loading-overlay" id="loadingOverlay">
+<div class="auth-overlay" id="authOverlay">
+  <form class="auth-box" id="authForm" autocomplete="off">
+    <h2>비밀번호 확인</h2>
+    <p>이 대시보드는 관계자만 조회할 수 있습니다.</p>
+    <input type="password" class="auth-input" id="authPassword" placeholder="비밀번호" inputmode="numeric" autofocus>
+    <button type="submit" class="auth-btn">확인</button>
+    <div class="auth-error" id="authError"></div>
+  </form>
+</div>
+
+<div class="loading-overlay hidden" id="loadingOverlay">
   <div class="loading-spinner"></div>
   <div class="loading-text" id="loadingText">대시보드 데이터를 준비하는 중...</div>
 </div>
@@ -3260,45 +3347,27 @@ function bucketBySize(totalHead){
 // p9는 조사월(년+월) 범위(monthRange = {start, end}, 각각 'YYYY-MM')로만 조회한다 — 지정하지 않으면 전체 기간을 대상으로 한다.
 // 도매시장(경매) 관련 통계는 원천에 없어 산출하지 않는다.
 function computeLegacyReportStats(monthRange){
-  if (!excelPriceRows || !excelCompanyRows) return null;
+  if (!allPriceRecords || allPriceRecords.length === 0) return null;
 
-  const compHeaders = excelCompanyRows[0] || [];
-  const compNameIdx = compHeaders.indexOf('업체명');
-  const compRegionIdx = compHeaders.indexOf('시도명');
-  const compUseIdx = compHeaders.indexOf('사용여부');
+  // company_name -> 시도명(사용여부 Y, 테스트업체 제외). regionGroupOf()에 넘길 원본 시도명이며
+  // 권역(region_group)이 아니다 — computeSection1/3에서 regionGroupOf(row.region)으로 변환해서 쓴다.
   const companyRegionMap = {};
-  for (let i = 1; i < excelCompanyRows.length; i++) {
-    const row = excelCompanyRows[i];
-    if (!row || row.length === 0) continue;
-    const name = row[compNameIdx];
-    const useYn = row[compUseIdx] || 'Y';
-    if (name && useYn === 'Y' && !TEST_COMPANIES.includes(name)) {
-      companyRegionMap[name] = row[compRegionIdx] || '';
+  allCompanies.forEach(c => {
+    if (c.company_name && c.use_yn === 'Y' && !TEST_COMPANIES.includes(c.company_name)) {
+      companyRegionMap[c.company_name] = c.sido_name || '';
     }
-  }
-
-  const parseNum = val => {
-    if (val === null || val === undefined || val === '') return 0;
-    if (typeof val === 'number') return val;
-    return parseFloat(String(val).replace(/,/g, '')) || 0;
-  };
+  });
 
   const rows = [];
   let minDate = null, maxDate = null;
-  for (let i = 3; i < excelPriceRows.length; i++) {
-    const r = excelPriceRows[i];
-    if (!r || r.length < 2) continue;
-    const company = r[0];
-    const dateStr = r[1];
-    if (!company || !dateStr || TEST_COMPANIES.includes(company)) continue;
+  allPriceRecords.forEach(r => {
+    const company = r.company_name;
+    const dateStr = r.date_str;
+    if (!company || !dateStr || TEST_COMPANIES.includes(company)) return;
     const rowYm = dateStr.substring(0, 7);
-    if (monthRange && monthRange.start && (rowYm < monthRange.start || rowYm > monthRange.end)) continue;
+    if (monthRange && monthRange.start && (rowYm < monthRange.start || rowYm > monthRange.end)) return;
 
-    let regDate = dateStr;
-    if (r[16]) {
-      const m = String(r[16]).match(/^(\d{4}-\d{2}-\d{2})/);
-      if (m) regDate = m[1];
-    }
+    const regDate = r.reg_date_str || dateStr;
     if (!minDate || regDate < minDate) minDate = regDate;
     if (!maxDate || regDate > maxDate) maxDate = regDate;
 
@@ -3306,21 +3375,21 @@ function computeLegacyReportStats(monthRange){
       company,
       date: dateStr,
       regDate,
-      ym: dateStr.substring(0, 7),
-      headCount: parseNum(r[2]),
-      liveWeight: parseNum(r[3]),
-      totalAmount: parseNum(r[4]),
-      paymentRate: (r[5] !== null && r[5] !== undefined && r[5] !== '') ? parseFloat(r[5]) : null,
-      carcassHead: parseNum(r[6]),
-      carcassWeight: parseNum(r[7]),
-      femaleHead: parseNum(r[8]),
-      castratedHead: parseNum(r[10]),
-      maleHead: parseNum(r[12]),
-      priceType: (r[14] !== null && r[14] !== undefined && r[14] !== '') ? String(r[14]) : null,
-      appliedUnitPrice: (r[15] !== null && r[15] !== undefined && r[15] !== '') ? parseFloat(String(r[15]).replace(/,/g, '')) : null,
+      ym: rowYm,
+      headCount: r.head_count,
+      liveWeight: r.live_weight,
+      totalAmount: r.total_amount,
+      paymentRate: r.payment_rate,
+      carcassHead: r.carcass_head,
+      carcassWeight: r.carcass_weight,
+      femaleHead: r.female_head,
+      castratedHead: r.castrated_head,
+      maleHead: r.male_head,
+      priceType: r.price_type ? r.price_type : null,
+      appliedUnitPrice: r.applied_price > 0 ? r.applied_price : null,
       region: companyRegionMap[company] || '기타'
     });
-  }
+  });
 
   if (rows.length === 0) return null;
 
@@ -3609,7 +3678,7 @@ function renderP9(){
   const stats = computeLegacyReportStats(monthRange);
   if (!stats) {
     const rangeLabel = monthRange.start === monthRange.end ? lrYmLabel(monthRange.start) : `${lrYmLabel(monthRange.start)}~${lrYmLabel(monthRange.end)}`;
-    const msg = (!excelPriceRows || !excelCompanyRows)
+    const msg = (!allPriceRecords || allPriceRecords.length === 0)
       ? '등록된 가격정보·업체정보 데이터가 없어 통계를 표시할 수 없습니다. 좌측에서 엑셀을 업로드해 주세요.'
       : `선택하신 조사월(${rangeLabel})에 해당하는 거래 데이터가 없습니다. 조사월을 다시 확인해 주세요.`;
     el.innerHTML = `<div class="card"><div class="note">${msg}</div></div>`;
@@ -4560,10 +4629,44 @@ setChartDefaults();
 // 개인정보·API 키가 포함될 수 있으므로, 공개 필드만 담은 내장 데이터로 시작한다.
 // DATA가 서버에서 채워지기 전에 activatePage()가 렌더링을 시도하면 DATA.monthly 등이
 // undefined라 에러가 나므로, 최초 데이터 로드가 끝난 뒤에 페이지를 활성화한다.
-loadEmbeddedOnly().then(() => {
-  activatePage(HASH_PAGE[location.hash.replace('#', '')] || 'p1', false);
-  updateTopbarFooter(document.querySelector('.nav-item.active').dataset.page);
+// ================= 접근 비밀번호 확인 =================
+// 정적 사이트라 완전한 접근 제어는 아니지만, 관계없는 방문자가 URL만 알고
+// 바로 데이터를 보는 것을 막기 위한 1차 확인 절차다.
+const DASHBOARD_PASSWORD = '1234';
+const AUTH_STORAGE_KEY = 'pig_dashboard_authed';
+
+function startDashboard() {
+  document.getElementById('loadingOverlay').classList.remove('hidden');
+  loadEmbeddedOnly().then(() => {
+    activatePage(HASH_PAGE[location.hash.replace('#', '')] || 'p1', false);
+    updateTopbarFooter(document.querySelector('.nav-item.active').dataset.page);
+  });
+}
+
+const authOverlay = document.getElementById('authOverlay');
+const authForm = document.getElementById('authForm');
+const authPassword = document.getElementById('authPassword');
+const authError = document.getElementById('authError');
+
+authForm.addEventListener('submit', function(e) {
+  e.preventDefault();
+  if (authPassword.value === DASHBOARD_PASSWORD) {
+    localStorage.setItem(AUTH_STORAGE_KEY, 'ok');
+    authOverlay.classList.add('hidden');
+    startDashboard();
+  } else {
+    authError.textContent = '비밀번호가 올바르지 않습니다.';
+    authPassword.value = '';
+    authPassword.focus();
+  }
 });
+
+if (localStorage.getItem(AUTH_STORAGE_KEY) === 'ok') {
+  authOverlay.classList.add('hidden');
+  startDashboard();
+} else {
+  authPassword.focus();
+}
 
 </script>
 </body>

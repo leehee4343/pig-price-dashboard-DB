@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="refresh" content="1; url=public/index.html">
+  <title>돼지 거래가격 대시보드 프로그램 시작</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background: radial-gradient(circle at center, #1e293b, #0f172a);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      color: #f1f5f9;
+      overflow: hidden;
+    }
+    .container {
+      text-align: center;
+      animation: fadeIn 0.8s ease-out;
+    }
+    h1 {
+      font-size: 24px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      letter-spacing: -0.5px;
+      color: #38bdf8;
+    }
+    p {
+      font-size: 14px;
+      color: #94a3b8;
+      margin-bottom: 24px;
+    }
+    .loader {
+      display: inline-block;
+      width: 40px;
+      height: 40px;
+      border: 3px solid rgba(56, 189, 248, 0.1);
+      border-radius: 50%;
+      border-top-color: #38bdf8;
+      animation: spin 1s ease-in-out infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+  <script>
+    setTimeout(function() {
+      window.location.href = "public/index.html";
+    }, 800);
+  </script>
+</head>
+<body>
+  <div class="container">
+    <div class="loader"></div>
+    <h1>돼지 거래가격 대시보드 실행 중</h1>
+    <p>잠시 후 이 PC에 있는 프로그램(public/index.html)으로 자동 연결됩니다.</p>
+  </div>
+</body>
+</html>
