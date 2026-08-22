@@ -8,6 +8,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;800;900&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- GitHub Pages 배포용 Supabase 설정. 값은 config/supabase.config.js에서 관리합니다. -->
+<script src="config/supabase.config.js"></script>
 <script>
 /*!
  * Chart.js v4.4.1
@@ -915,7 +918,468 @@ tbody tr:hover { background: var(--bg); }
 <script>
 let DATA = {};
 let FILTER_DATA = { regions: [], companies: [], months: [] };
-// ================= 엑셀 파일 로드 및 가공 엔진 =================
+
+// ================= Supabase 클라우드 DB 연동 =================
+// 서버 없이 GitHub Pages에서 동작하므로, 원본 레코드를 Supabase에서 통째로
+// 불러온 뒤 브라우저에서 집계한다 (구 server.js의 SQL 집계 로직을 그대로 이식).
+const _pigSupabaseCfg = window.PIG_SUPABASE_CONFIG || {};
+const supabaseClient = (window.supabase && _pigSupabaseCfg.url && _pigSupabaseCfg.anonKey)
+  ? window.supabase.createClient(_pigSupabaseCfg.url, _pigSupabaseCfg.anonKey)
+  : null;
+
+let allCompanies = [];    // pig_companies 테이블 원본 행
+let allPriceRecords = []; // pig_price_records 테이블 원본 행
+
+// Supabase(PostgREST)는 select('*')를 기본 1000행으로 잘라서 응답하므로,
+// 전체를 다 받을 때까지 range()로 페이지를 나눠 반복 조회한다.
+async function fetchAllRows(table) {
+  const pageSize = 1000;
+  let from = 0;
+  let allRows = [];
+  while (true) {
+    const { data, error } = await supabaseClient.from(table).select('*').range(from, from + pageSize - 1);
+    if (error) throw error;
+    allRows = allRows.concat(data || []);
+    if (!data || data.length < pageSize) break;
+    from += pageSize;
+  }
+  return allRows;
+}
+
+async function loadAllDataFromSupabase() {
+  if (!supabaseClient) throw new Error('Supabase 설정을 찾을 수 없습니다 (config/supabase.config.js 확인 필요).');
+  const [companies, priceRecords] = await Promise.all([
+    fetchAllRows('pig_companies'),
+    fetchAllRows('pig_price_records')
+  ]);
+  allCompanies = companies;
+  allPriceRecords = priceRecords;
+}
+
+// ================= 관리자 대시보드 통계 집계 연산 로직 (구 server.js에서 이식) =================
+function compileDashboardData(records, activeCompanies) {
+  const allRegisteredCompanies = new Set(activeCompanies.map(c => c.company_name));
+  const companyRegionMap = {};
+  activeCompanies.forEach(c => {
+    companyRegionMap[c.company_name] = regionGroupOf(c.sido_name);
+  });
+
+  const validRows = [];
+  const rawDataQualityAnomalyList = [];
+  let nullRateCount = 0;
+
+  const fieldDefs = [
+    { key: '두수(생돈매입)', col: 'head_count' },
+    { key: '생체중계(kg)', col: 'live_weight' },
+    { key: '총거래금액(원)', col: 'total_amount' },
+    { key: '지급률(%)', col: 'payment_rate' },
+    { key: '도체두수(계)', col: 'carcass_head' },
+    { key: '도체중(계,kg)', col: 'carcass_weight' },
+    { key: '암 두수', col: 'female_head' },
+    { key: '암 도체중(kg)', col: 'female_weight' },
+    { key: '거세 두수', col: 'castrated_head' },
+    { key: '거세 도체중(kg)', col: 'castrated_weight' },
+    { key: '수 두수', col: 'male_head' },
+    { key: '수 도체중(kg)', col: 'male_weight' },
+    { key: '적용단가 유형', col: 'price_type' },
+    { key: '적용단가(원/kg)', col: 'applied_price' }
+  ];
+  const companyFieldMissingCounts = {};
+  const isBlank = v => v === null || v === undefined || v === '';
+
+  records.forEach(r => {
+    const unitPrice = r.live_weight > 0 ? r.total_amount / r.live_weight : 0;
+
+    if (r.payment_rate === null) nullRateCount++;
+
+    const company = r.company_name;
+    if (!companyFieldMissingCounts[company]) {
+      companyFieldMissingCounts[company] = {};
+      fieldDefs.forEach(f => { companyFieldMissingCounts[company][f.key] = 0; });
+    }
+    fieldDefs.forEach(f => {
+      if (isBlank(r[f.col])) {
+        companyFieldMissingCounts[company][f.key]++;
+      }
+    });
+
+    const rowObj = {
+      company: r.company_name,
+      date: r.date_str,
+      regDate: r.reg_date_str,
+      headCount: r.head_count,
+      liveWeight: r.live_weight,
+      totalAmount: r.total_amount,
+      paymentRate: r.payment_rate,
+      carcassHead: r.carcass_head,
+      carcassWeight: r.carcass_weight,
+      femaleHead: r.female_head,
+      femaleWeight: r.female_weight,
+      castratedHead: r.castrated_head,
+      castratedWeight: r.castrated_weight,
+      maleHead: r.male_head,
+      maleWeight: r.male_weight,
+      unitPrice,
+      region: r.region_group
+    };
+    validRows.push(rowObj);
+
+    if (unitPrice > 0 && (unitPrice < 2500 || unitPrice > 9000)) {
+      rawDataQualityAnomalyList.push({
+        업체: r.company_name,
+        조사일자: r.date_str,
+        등록일자: r.reg_date_str,
+        두수: r.head_count,
+        생체중: r.live_weight,
+        총거래금액: r.total_amount,
+        kg당가격: unitPrice
+      });
+    }
+  });
+
+  let totalAmountSum = 0;
+  let totalHeadSum = 0;
+  let totalLiveWeightSum = 0;
+  let totalCarcassWeightSum = 0;
+  let unitPriceWeightedSum = 0;
+  let validPaymentRateSum = 0;
+  let validPaymentRateCount = 0;
+
+  const uniqueCompanies = new Set();
+  const dateList = [];
+
+  let femaleHeadSum = 0;
+  let castratedHeadSum = 0;
+  let maleHeadSum = 0;
+  let femaleWeightSum = 0;
+  let castratedWeightSum = 0;
+  let maleWeightSum = 0;
+
+  const monthlyGroup = {};
+  const weeklyGroup = {};
+  const dailyGroup = {};
+  const companyGroup = {};
+  const regionGroup = {};
+
+  validRows.forEach(r => {
+    totalAmountSum += r.totalAmount;
+    totalHeadSum += r.headCount;
+    totalLiveWeightSum += r.liveWeight;
+    totalCarcassWeightSum += r.carcassWeight;
+    unitPriceWeightedSum += (r.unitPrice * r.liveWeight);
+
+    if (r.paymentRate !== null) {
+      validPaymentRateSum += r.paymentRate;
+      validPaymentRateCount++;
+    }
+
+    uniqueCompanies.add(r.company);
+    dateList.push(new Date(r.date));
+
+    femaleHeadSum += r.femaleHead;
+    femaleWeightSum += r.femaleWeight;
+    castratedHeadSum += r.castratedHead;
+    castratedWeightSum += r.castratedWeight;
+    maleHeadSum += r.maleHead;
+    maleWeightSum += r.maleWeight;
+
+    const ym = r.date.substring(0, 7);
+    if (!monthlyGroup[ym]) {
+      monthlyGroup[ym] = { ym, count: 0, head: 0, live: 0, amount: 0, rateSum: 0, rateCount: 0, priceWeighted: 0 };
+    }
+    monthlyGroup[ym].count++;
+    monthlyGroup[ym].head += r.headCount;
+    monthlyGroup[ym].live += r.liveWeight;
+    monthlyGroup[ym].amount += r.totalAmount;
+    monthlyGroup[ym].priceWeighted += (r.unitPrice * r.liveWeight);
+    if (r.paymentRate !== null) {
+      monthlyGroup[ym].rateSum += r.paymentRate;
+      monthlyGroup[ym].rateCount++;
+    }
+
+    const sunStr = getSundayDateString(r.date);
+    if (!weeklyGroup[sunStr]) {
+      weeklyGroup[sunStr] = { week: sunStr, count: 0, head: 0, amount: 0, live: 0, carcass: 0, rateSum: 0, rateCount: 0 };
+    }
+    weeklyGroup[sunStr].count++;
+    weeklyGroup[sunStr].head += r.headCount;
+    weeklyGroup[sunStr].amount += r.totalAmount;
+    weeklyGroup[sunStr].live += r.liveWeight;
+    weeklyGroup[sunStr].carcass += r.carcassWeight;
+    if (r.paymentRate !== null) {
+      weeklyGroup[sunStr].rateSum += r.paymentRate;
+      weeklyGroup[sunStr].rateCount++;
+    }
+
+    if (!dailyGroup[r.date]) {
+      dailyGroup[r.date] = { day: r.date, count: 0, head: 0, amount: 0, live: 0, carcass: 0, rateSum: 0, rateCount: 0 };
+    }
+    dailyGroup[r.date].count++;
+    dailyGroup[r.date].head += r.headCount;
+    dailyGroup[r.date].amount += r.totalAmount;
+    dailyGroup[r.date].live += r.liveWeight;
+    dailyGroup[r.date].carcass += r.carcassWeight;
+    if (r.paymentRate !== null) {
+      dailyGroup[r.date].rateSum += r.paymentRate;
+      dailyGroup[r.date].rateCount++;
+    }
+
+    if (!companyGroup[r.company]) {
+      companyGroup[r.company] = {
+        name: r.company, count: 0, head: 0, live: 0, amount: 0,
+        rateSum: 0, rateCount: 0, prices: [], region: r.region, lastRegDate: r.regDate, dateSet: new Set()
+      };
+    }
+    companyGroup[r.company].count++;
+    companyGroup[r.company].head += r.headCount;
+    companyGroup[r.company].live += r.liveWeight;
+    companyGroup[r.company].amount += r.totalAmount;
+    companyGroup[r.company].prices.push(r.unitPrice);
+    companyGroup[r.company].dateSet.add(r.date);
+    if (r.regDate > companyGroup[r.company].lastRegDate) {
+      companyGroup[r.company].lastRegDate = r.regDate;
+    }
+    if (r.paymentRate !== null) {
+      companyGroup[r.company].rateSum += r.paymentRate;
+      companyGroup[r.company].rateCount++;
+    }
+
+    if (!regionGroup[r.region]) {
+      regionGroup[r.region] = { name: r.region, count: 0, head: 0, live: 0, amount: 0, comps: new Set(), priceWeighted: 0 };
+    }
+    regionGroup[r.region].count++;
+    regionGroup[r.region].head += r.headCount;
+    regionGroup[r.region].live += r.liveWeight;
+    regionGroup[r.region].amount += r.totalAmount;
+    regionGroup[r.region].comps.add(r.company);
+    regionGroup[r.region].priceWeighted += (r.unitPrice * r.liveWeight);
+  });
+
+  dateList.sort((a,b)=>a-b);
+  const formatDate = d => {
+    const y = d.getFullYear();
+    let m = d.getMonth() + 1;
+    let dd = d.getDate();
+    return `${y}-${m < 10 ? '0'+m : m}-${dd < 10 ? '0'+dd : dd}`;
+  };
+  const startDateStr = dateList.length > 0 ? formatDate(dateList[0]) : '';
+  const endDateStr = dateList.length > 0 ? formatDate(dateList[dateList.length - 1]) : '';
+
+  const avgPaymentRateGlobal = validPaymentRateCount > 0 ? parseFloat((validPaymentRateSum / validPaymentRateCount).toFixed(2)) : 0;
+  const avgCarcassRateGlobal = totalLiveWeightSum > 0 ? parseFloat((totalCarcassWeightSum / totalLiveWeightSum * 100).toFixed(2)) : 0;
+
+  const monthlyList = Object.values(monthlyGroup).map(g => ({
+    "연월": g.ym,
+    "거래건수": g.count,
+    "총두수": g.head,
+    "총생체중": g.live,
+    "총거래금액": g.amount,
+    "평균지급률": g.rateCount > 0 ? g.rateSum / g.rateCount : null,
+    "평균kg당가격": g.live > 0 ? Math.round(g.priceWeighted / g.live) : 0
+  })).sort((a,b)=>a.연월.localeCompare(b.연월));
+
+  const weeklyList = Object.values(weeklyGroup).map(g => ({
+    "주": g.week,
+    "거래건수": g.count,
+    "총두수": g.head,
+    "총생체중": g.live,
+    "총거래금액": g.amount,
+    "평균단가": g.live > 0 ? Math.round(g.amount / g.live) : 0,
+    "도체율": g.live > 0 ? parseFloat((g.carcass / g.live * 100).toFixed(2)) : 0,
+    "평균지급률": g.rateCount > 0 ? parseFloat((g.rateSum / g.rateCount).toFixed(2)) : null
+  })).sort((a,b)=>a.주.localeCompare(b.주));
+
+  const dailyList = Object.values(dailyGroup).map(g => ({
+    "일자": g.day,
+    "거래건수": g.count,
+    "총두수": g.head,
+    "총생체중": g.live,
+    "총거래금액": g.amount,
+    "평균kg당가격": g.live > 0 ? Math.round(g.amount / g.live) : 0,
+    "도체율": g.live > 0 ? parseFloat((g.carcass / g.live * 100).toFixed(2)) : 0,
+    "평균지급률": g.rateCount > 0 ? parseFloat((g.rateSum / g.rateCount).toFixed(2)) : null
+  })).sort((a,b)=>a.일자.localeCompare(b.일자));
+
+  const companyList = Object.values(companyGroup).map(g => {
+    const meanPrice = g.live > 0 ? g.amount / g.live : 0;
+    let variance = 0;
+    if (g.prices.length > 1) {
+      const avg = g.prices.reduce((sum,p)=>sum+p, 0) / g.prices.length;
+      const squaredDiffs = g.prices.map(p => Math.pow(p - avg, 2));
+      variance = squaredDiffs.reduce((sum,v)=>sum+v, 0) / (g.prices.length - 1);
+    }
+    const stdDev = Math.sqrt(variance);
+
+    return {
+      "업체": g.name,
+      "거래건수": g.count,
+      "총두수": g.head,
+      "총생체중": g.live,
+      "총거래금액": g.amount,
+      "평균지급률": g.rateCount > 0 ? parseFloat((g.rateSum / g.rateCount).toFixed(2)) : null,
+      "권역": g.region,
+      "평균kg당가격": Math.round(meanPrice),
+      "가격변동성": parseFloat(stdDev.toFixed(1)),
+      "거래일수": g.dateSet.size
+    };
+  });
+
+  const NON_REQUIRED_FIELD_KEYS = ['암 두수', '암 도체중(kg)', '거세 두수', '거세 도체중(kg)', '수 두수', '수 도체중(kg)'];
+  const requiredFieldDefs = fieldDefs.filter(f => !NON_REQUIRED_FIELD_KEYS.includes(f.key));
+  const companyFieldQualityList = Object.values(companyGroup)
+    .sort((a,b)=>b.count-a.count)
+    .map(g => {
+      const missingByField = companyFieldMissingCounts[g.name] || {};
+      const 항목목록 = requiredFieldDefs.map(f => {
+        const missing = missingByField[f.key] || 0;
+        const filled = g.count - missing;
+        return {
+          "항목": f.key,
+          "입력건수": filled,
+          "총건수": g.count,
+          "입력비율": g.count > 0 ? parseFloat((filled / g.count * 100).toFixed(1)) : 0
+        };
+      });
+      return { "업체": g.name, "총건수": g.count, "최근등록일": g.lastRegDate, "항목목록": 항목목록 };
+    });
+
+  const regionList = Object.values(regionGroup).map(g => ({
+    "권역": g.name,
+    "거래건수": g.count,
+    "총두수": g.head,
+    "총생체중": g.live,
+    "총거래금액": g.amount,
+    "업체수": g.comps.size,
+    "평균kg당가격": g.live > 0 ? Math.round(g.priceWeighted / g.live) : 0
+  })).sort((a,b)=>b.총거래금액 - a.총거래금액);
+
+  const monthlyRateList = monthlyList.map(m => ({
+    "연월": m.연월,
+    "지급률": m.평균지급률 ? parseFloat(m.평균지급률.toFixed(2)) : 0
+  }));
+
+  const monthlyYieldList = Object.keys(monthlyGroup).sort().map(ym => {
+    const rowsInMonth = validRows.filter(r => r.date.substring(0,7) === ym);
+    const liveSum = rowsInMonth.reduce((sum,r)=>sum+r.liveWeight, 0);
+    const carcassSum = rowsInMonth.reduce((sum,r)=>sum+r.carcassWeight, 0);
+    return {
+      "연월": ym,
+      "도체율": liveSum > 0 ? parseFloat((carcassSum / liveSum * 100).toFixed(2)) : 0
+    };
+  });
+
+  const companyRateList = companyList.filter(c => c.평균지급률 !== null).map(c => {
+    const rawRowsForComp = validRows.filter(r => r.company === c.업체 && r.paymentRate !== null);
+    const compRates = rawRowsForComp.map(r=>r.paymentRate);
+    const minRate = compRates.length > 0 ? Math.min(...compRates) : 0;
+    const maxRate = compRates.length > 0 ? Math.max(...compRates) : 0;
+    return {
+      "업체": c.업체,
+      "평균": c.평균지급률,
+      "min": parseFloat(minRate.toFixed(1)),
+      "max": parseFloat(maxRate.toFixed(1)),
+      "건수": rawRowsForComp.length
+    };
+  }).sort((a,b)=>b.평균 - a.평균);
+
+  const rateBins = [
+    { label: "65~70%", min: 65, max: 70 },
+    { label: "70~72%", min: 70, max: 72 },
+    { label: "72~74%", min: 72, max: 74 },
+    { label: "74~75%", min: 74, max: 75 },
+    { label: "75~76%", min: 75, max: 76 },
+    { label: "76~77%", min: 76, max: 77 },
+    { label: "77~78%", min: 77, max: 78 },
+    { label: "78~79%", min: 78, max: 79 },
+    { label: "79~80%", min: 79, max: 80 },
+    { label: "80~81%", min: 80, max: 81 }
+  ];
+  const rateHistogramList = rateBins.map(bin => {
+    const count = validRows.filter(r => r.paymentRate !== null && r.paymentRate >= bin.min && r.paymentRate < bin.max).length;
+    return {
+      "구간": bin.label,
+      "건수": count
+    };
+  });
+  rateHistogramList.push({ "구간": "미입력", "건수": nullRateCount });
+
+  const transactedCompanies = new Set(Object.keys(companyGroup));
+  const inactiveCompanies = [];
+  allRegisteredCompanies.forEach(c => {
+    if (!transactedCompanies.has(c)) {
+      inactiveCompanies.push(c);
+    }
+  });
+
+  const companyGroupValues = Object.values(companyGroup);
+  const referenceDateStr = companyGroupValues.reduce((max, g) => g.lastRegDate > max ? g.lastRegDate : max, companyGroupValues[0] ? companyGroupValues[0].lastRegDate : startDateStr);
+  const referenceDateObj = new Date(referenceDateStr + 'T00:00:00');
+
+  const recentlyInactiveCompanies = companyGroupValues.map(g => {
+    const lastDateObj = new Date(g.lastRegDate + 'T00:00:00');
+    const diffDays = Math.round((referenceDateObj - lastDateObj) / 86400000);
+    return { "업체": g.name, "권역": g.region, "최근등록일": g.lastRegDate, "경과일수": diffDays };
+  }).filter(d => d.경과일수 >= 30).sort((a,b)=>b.경과일수 - a.경과일수);
+
+  const companyRegistrationIssues = [
+    ...inactiveCompanies.map(c => ({ "업체": c, "권역": companyRegionMap[c] || '-', "상태": "거래가격 미등록", "최근등록일": '-', "경과일수": '-' })),
+    ...recentlyInactiveCompanies.map(d => ({ "업체": d.업체, "권역": d.권역, "상태": "최근 1개월 이상 미등록", "최근등록일": d.최근등록일, "경과일수": d.경과일수 }))
+  ];
+
+  return {
+    kpi: {
+      "총거래건수": validRows.length,
+      "총거래금액_원": totalAmountSum,
+      "총두수": totalHeadSum,
+      "평균kg당가격": totalLiveWeightSum > 0 ? Math.round(unitPriceWeightedSum / totalLiveWeightSum) : 0,
+      "총업체수": uniqueCompanies.size,
+      "평균도체율": avgCarcassRateGlobal,
+      "평균지급률": avgPaymentRateGlobal,
+      "조사시작일": startDateStr,
+      "조사종료일": endDateStr
+    },
+    monthly: monthlyList,
+    weekly_price: weeklyList,
+    daily: dailyList,
+    company: companyList,
+    region: regionList,
+    gender: {
+      "두수": {
+        "암": femaleHeadSum,
+        "거세": castratedHeadSum,
+        "수": maleHeadSum
+      },
+      "도체중": {
+        "암": femaleWeightSum,
+        "거세": castratedWeightSum,
+        "수": maleWeightSum
+      },
+      "두당평균도체중": {
+        "암": femaleHeadSum > 0 ? parseFloat((femaleWeightSum / femaleHeadSum).toFixed(1)) : 0,
+        "거세": castratedHeadSum > 0 ? parseFloat((castratedWeightSum / castratedHeadSum).toFixed(1)) : 0,
+        "수": maleHeadSum > 0 ? parseFloat((maleWeightSum / maleHeadSum).toFixed(1)) : 0
+      }
+    },
+    monthly_yield: monthlyYieldList,
+    rate_histogram: rateHistogramList,
+    monthly_rate: monthlyRateList,
+    company_rate: companyRateList,
+    data_quality: {
+      "이상치건수": rawDataQualityAnomalyList.length,
+      "이상치목록": rawDataQualityAnomalyList,
+      "지급률결측_전체건수": nullRateCount,
+      "지급률결측_비율": parseFloat((nullRateCount / validRows.length * 100).toFixed(1)),
+      "업체별항목입력현황": companyFieldQualityList,
+      "미참여등록업체": inactiveCompanies,
+      "총등록업체수": allRegisteredCompanies.size,
+      "기준일": referenceDateStr,
+      "최근미등록업체목록": recentlyInactiveCompanies,
+      "업체등록현황": companyRegistrationIssues
+    }
+  };
+}
+
+// ================= 엑셀 파일 로드 및 가공 엔진 (업로드용) =================
 let excelPriceRows = null;
 let excelCompanyRows = null;
 
@@ -1143,206 +1607,132 @@ function initFilterRange() {
   }
 }
 
-// 엑셀 통계 집계 연산
+// 엑셀 통계 집계 연산 (Supabase에서 불러온 원본 레코드를 브라우저에서 집계)
 async function fetchDashboardData(startDate, endDate, regionFilter, companyFilter) {
   try {
-    const url = `/api/dashboard-data?startDate=${startDate || ''}&endDate=${endDate || ''}&region=${regionFilter || ''}&company=${companyFilter || ''}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('Dashboard API request failed');
-    DATA = await res.json();
+    const activeCompanies = allCompanies.filter(c => c.use_yn === 'Y');
+    const sd = startDate || '1970-01-01';
+    const ed = endDate || '2999-12-31';
+    let records = allPriceRecords.filter(r => r.date_str >= sd && r.date_str <= ed);
+    if (regionFilter) records = records.filter(r => r.region_group === regionFilter);
+    if (companyFilter) records = records.filter(r => r.company_name === companyFilter);
+    DATA = compileDashboardData(records, activeCompanies);
     return true;
   } catch (e) {
-    console.error('Failed to fetch dashboard data:', e);
+    console.error('Failed to compute dashboard data:', e);
     return false;
   }
 }
 
-// ================= 업체용 통계(종합현황) 집계 =================
-// 관리자 화면(DATA)과 완전히 분리된, 단일 업체 전용 집계 함수.
-// 상단 필터바(지역/업체/기간)의 영향을 받지 않고 항상 전체 원본 데이터 중 해당 업체의 거래만 집계한다.
-// (업체는 자신의 거래만 볼 수 있어야 하므로, 다른 업체가 섞여 노출될 위험이 있는 공용 DATA를 재사용하지 않는다)
-function computeBizStats(companyName, startDate, endDate){
-  const parseNum = val => {
-    if (val === null || val === undefined || val === '') return 0;
-    if (typeof val === 'number') return val;
-    return parseFloat(String(val).replace(/,/g, '')) || 0;
-  };
-  const isBlank = v => v === null || v === undefined || v === '';
+// ================= P8 업체 상세 분석 집계 (구 server.js에서 이식) =================
+// records는 호출부(renderP8)에서 이미 조회기간으로 필터링된 allPriceRecords다.
+function computeBizStats(companyName, records) {
+  const list = records.filter(r => r.company_name === companyName);
+  if (list.length === 0) return null;
 
-  const rows = [];
-  let globalMaxRegDate = null;
-  for (let i = 3; i < excelPriceRows.length; i++) {
-    const r = excelPriceRows[i];
-    if (!r || r.length < 2) continue;
-    const company = r[0];
-    const dateStr = r[1];
-    if (!company || !dateStr) continue;
+  const count = list.length;
+  const head = list.reduce((sum, r) => sum + r.head_count, 0);
+  const live = list.reduce((sum, r) => sum + r.live_weight, 0);
+  const carcass = list.reduce((sum, r) => sum + r.carcass_weight, 0);
+  const amount = list.reduce((sum, r) => sum + r.total_amount, 0);
+  const rateRows = list.filter(r => r.payment_rate !== null);
+  const rateAvg = rateRows.length ? rateRows.reduce((sum, r) => sum + r.payment_rate, 0) / rateRows.length : null;
 
-    let regDate = dateStr;
-    if (r[16]) {
-      const m = String(r[16]).match(/^(\d{4}-\d{2}-\d{2})/);
-      if (m) regDate = m[1];
+  const dailyMap = {};
+  list.forEach(r => {
+    if (!dailyMap[r.date_str]) {
+      dailyMap[r.date_str] = { date: r.date_str, count: 0, head: 0, live: 0, carcass: 0, amount: 0, rateSum: 0, rateCount: 0 };
     }
-    if (!globalMaxRegDate || regDate > globalMaxRegDate) globalMaxRegDate = regDate;
-
-    if (company !== companyName) continue;
-    if (startDate && regDate < startDate) continue;
-    if (endDate && regDate > endDate) continue;
-
-    const headCount = parseNum(r[2]);
-    const liveWeight = parseNum(r[3]);
-    const totalAmount = parseNum(r[4]);
-    const paymentRate = (r[5] !== null && r[5] !== undefined && r[5] !== '') ? parseFloat(r[5]) : null;
-    const carcassHead = parseNum(r[6]);
-    const carcassWeight = parseNum(r[7]);
-    const femaleHead = parseNum(r[8]);
-    const castratedHead = parseNum(r[10]);
-    const maleHead = parseNum(r[12]);
-    const unitPrice = liveWeight > 0 ? totalAmount / liveWeight : 0;
-
-    rows.push({ date: dateStr, regDate, headCount, liveWeight, totalAmount, paymentRate, carcassHead, carcassWeight, femaleHead, castratedHead, maleHead, unitPrice, rawRow: r });
-  }
-
-  if (rows.length === 0) return null;
-
-  rows.sort((a,b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
-
-  let totalAmount=0, totalHead=0, totalLive=0, totalCarcass=0, unitPriceWeighted=0;
-  let rateSum=0, rateCount=0;
-  let femaleHeadSum=0, castratedHeadSum=0, maleHeadSum=0;
-  const monthlyGroup = {};
-  const weeklyGroup = {};
-  const dailyGroup = {};
-
-  rows.forEach(r => {
-    totalAmount += r.totalAmount;
-    totalHead += r.headCount;
-    totalLive += r.liveWeight;
-    totalCarcass += r.carcassWeight;
-    unitPriceWeighted += r.unitPrice * r.liveWeight;
-    if (r.paymentRate !== null) { rateSum += r.paymentRate; rateCount++; }
-    femaleHeadSum += r.femaleHead; castratedHeadSum += r.castratedHead; maleHeadSum += r.maleHead;
-
-    const ym = r.date.substring(0,7);
-    if (!monthlyGroup[ym]) monthlyGroup[ym] = { ym, count:0, head:0, live:0, amount:0, carcass:0, rateSum:0, rateCount:0, priceWeighted:0 };
-    const g = monthlyGroup[ym];
-    g.count++; g.head += r.headCount; g.live += r.liveWeight; g.amount += r.totalAmount; g.carcass += r.carcassWeight;
-    g.priceWeighted += r.unitPrice * r.liveWeight;
-    if (r.paymentRate !== null) { g.rateSum += r.paymentRate; g.rateCount++; }
-
-    const sunStr = getSundayDateString(r.date);
-    if (!weeklyGroup[sunStr]) weeklyGroup[sunStr] = { week: sunStr, count:0, head:0, live:0, amount:0, carcass:0, rateSum:0, rateCount:0 };
-    const wg = weeklyGroup[sunStr];
-    wg.count++; wg.head += r.headCount; wg.live += r.liveWeight; wg.amount += r.totalAmount; wg.carcass += r.carcassWeight;
-    if (r.paymentRate !== null) { wg.rateSum += r.paymentRate; wg.rateCount++; }
-
-    if (!dailyGroup[r.date]) dailyGroup[r.date] = { day: r.date, count:0, head:0, live:0, amount:0, carcass:0, rateSum:0, rateCount:0 };
-    const dg = dailyGroup[r.date];
-    dg.count++; dg.head += r.headCount; dg.live += r.liveWeight; dg.amount += r.totalAmount; dg.carcass += r.carcassWeight;
-    if (r.paymentRate !== null) { dg.rateSum += r.paymentRate; dg.rateCount++; }
+    const d = dailyMap[r.date_str];
+    d.count++;
+    d.head += r.head_count;
+    d.live += r.live_weight;
+    d.carcass += r.carcass_weight;
+    d.amount += r.total_amount;
+    if (r.payment_rate !== null) {
+      d.rateSum += r.payment_rate;
+      d.rateCount++;
+    }
   });
-
-  const monthlyList = Object.keys(monthlyGroup).sort().map(ym => {
-    const g = monthlyGroup[ym];
-    return {
-      연월: ym,
-      거래건수: g.count,
-      총두수: g.head,
-      총거래금액: g.amount,
-      평균kg당가격: g.live > 0 ? Math.round(g.priceWeighted / g.live) : 0,
-      평균도체율: g.live > 0 ? parseFloat((g.carcass / g.live * 100).toFixed(2)) : 0,
-      평균지급률: g.rateCount > 0 ? parseFloat((g.rateSum / g.rateCount).toFixed(2)) : null
-    };
-  });
-
-  const weeklyList = Object.values(weeklyGroup).map(g => ({
-    주: g.week,
-    거래건수: g.count,
-    총두수: g.head,
-    총거래금액: g.amount,
-    평균단가: g.live > 0 ? Math.round(g.amount / g.live) : 0,
-    평균도체율: g.live > 0 ? parseFloat((g.carcass / g.live * 100).toFixed(2)) : 0,
-    평균지급률: g.rateCount > 0 ? parseFloat((g.rateSum / g.rateCount).toFixed(2)) : null
-  })).sort((a,b) => a.주.localeCompare(b.주));
-
-  const dailyList = Object.values(dailyGroup).map(g => ({
-    일자: g.day,
-    거래건수: g.count,
-    총두수: g.head,
-    총거래금액: g.amount,
-    평균kg당가격: g.live > 0 ? Math.round(g.amount / g.live) : 0,
-    평균도체율: g.live > 0 ? parseFloat((g.carcass / g.live * 100).toFixed(2)) : 0,
-    평균지급률: g.rateCount > 0 ? parseFloat((g.rateSum / g.rateCount).toFixed(2)) : null
+  const daily = Object.values(dailyMap).map(d => ({
+    "일자": d.date,
+    "거래건수": d.count,
+    "총두수": d.head,
+    "총생체중": d.live,
+    "총거래금액": d.amount,
+    "평균kg당가격": d.live > 0 ? Math.round(d.amount / d.live) : 0,
+    "도체율": d.live > 0 ? parseFloat((d.carcass / d.live * 100).toFixed(2)) : 0,
+    "평균지급률": d.rateCount > 0 ? parseFloat((d.rateSum / d.rateCount).toFixed(2)) : null
   })).sort((a,b) => a.일자.localeCompare(b.일자));
 
-  const rateBins = [
-    { label:"65~70%", min:65, max:70 }, { label:"70~72%", min:70, max:72 }, { label:"72~74%", min:72, max:74 },
-    { label:"74~75%", min:74, max:75 }, { label:"75~76%", min:75, max:76 }, { label:"76~77%", min:76, max:77 },
-    { label:"77~78%", min:77, max:78 }, { label:"78~79%", min:78, max:79 }, { label:"79~80%", min:79, max:80 },
-    { label:"80~81%", min:80, max:81 }
-  ];
-  const rateHistogram = rateBins.map(bin => ({
-    구간: bin.label,
-    건수: rows.filter(r => r.paymentRate !== null && r.paymentRate >= bin.min && r.paymentRate < bin.max).length
-  }));
-  const nullRateCount = rows.filter(r => r.paymentRate === null).length;
-  rateHistogram.push({ 구간:'미입력', 건수: nullRateCount });
-
-  // 필수 입력 항목(성별 상세 두수·도체중 제외)의 자사 기준 입력 현황
-  const bizFieldDefs = [
-    { key:'두수(생돈매입)', idx:2 }, { key:'생체중계(kg)', idx:3 }, { key:'총거래금액(원)', idx:4 },
-    { key:'지급률(%)', idx:5 }, { key:'도체두수(계)', idx:6 }, { key:'도체중(계,kg)', idx:7 },
-    { key:'적용단가 유형', idx:14 }, { key:'적용단가(원/kg)', idx:15 }
-  ];
-  const fieldStatus = bizFieldDefs.map(f => {
-    const missing = rows.filter(r => isBlank(r.rawRow[f.idx])).length;
-    const filled = rows.length - missing;
-    return { 항목: f.key, 입력건수: filled, 총건수: rows.length, 입력비율: rows.length > 0 ? parseFloat((filled / rows.length * 100).toFixed(1)) : 0 };
+  const weeklyMap = {};
+  list.forEach(r => {
+    const sunStr = getSundayDateString(r.date_str);
+    if (!weeklyMap[sunStr]) {
+      weeklyMap[sunStr] = { week: sunStr, count: 0, head: 0, live: 0, carcass: 0, amount: 0, rateSum: 0, rateCount: 0 };
+    }
+    const w = weeklyMap[sunStr];
+    w.count++;
+    w.head += r.head_count;
+    w.live += r.live_weight;
+    w.carcass += r.carcass_weight;
+    w.amount += r.total_amount;
+    if (r.payment_rate !== null) {
+      w.rateSum += r.payment_rate;
+      w.rateCount++;
+    }
   });
+  const weekly = Object.values(weeklyMap).map(w => ({
+    "주": w.week,
+    "거래건수": w.count,
+    "총두수": w.head,
+    "총생체중": w.live,
+    "총거래금액": w.amount,
+    "평균단가": w.live > 0 ? Math.round(w.amount / w.live) : 0,
+    "도체율": w.live > 0 ? parseFloat((w.carcass / w.live * 100).toFixed(2)) : 0,
+    "평균지급률": w.rateCount > 0 ? parseFloat((w.rateSum / w.rateCount).toFixed(2)) : null
+  })).sort((a,b) => a.주.localeCompare(b.주));
 
-  const lastRegDate = rows.reduce((max,r) => r.regDate > max ? r.regDate : max, rows[0].regDate);
-  const refDate = globalMaxRegDate || lastRegDate;
-  const daysSinceLastReg = Math.round((new Date(refDate + 'T00:00:00') - new Date(lastRegDate + 'T00:00:00')) / 86400000);
-
-  const anomalies = rows.filter(r => r.unitPrice > 0 && (r.unitPrice < 2500 || r.unitPrice > 9000)).map(r => ({
-    조사일자: r.date, 두수: r.headCount, 생체중: r.liveWeight, 총거래금액: r.totalAmount, kg당가격: Math.round(r.unitPrice)
-  }));
-
-  const detail = [...rows].sort((a,b) => a.date < b.date ? 1 : -1).map(r => ({
-    조사일자: r.date, 두수: r.headCount, 생체중: r.liveWeight, 총거래금액: r.totalAmount,
-    kg당가격: Math.round(r.unitPrice), 지급률: r.paymentRate, 도체두수: r.carcassHead, 도체중: r.carcassWeight, 등록일자: r.regDate
-  }));
-
-  let region = '';
-  const compHeaders = excelCompanyRows[0] || [];
-  const compNameIdx = compHeaders.indexOf('업체명');
-  const compRegionIdx = compHeaders.indexOf('시도명');
-  for (let i=1; i<excelCompanyRows.length; i++) {
-    if (excelCompanyRows[i][compNameIdx] === companyName) { region = excelCompanyRows[i][compRegionIdx] || ''; break; }
-  }
+  const monthlyMap = {};
+  list.forEach(r => {
+    const ym = r.date_str.substring(0, 7);
+    if (!monthlyMap[ym]) {
+      monthlyMap[ym] = { ym, count: 0, head: 0, live: 0, carcass: 0, amount: 0, rateSum: 0, rateCount: 0 };
+    }
+    const m = monthlyMap[ym];
+    m.count++;
+    m.head += r.head_count;
+    m.live += r.live_weight;
+    m.carcass += r.carcass_weight;
+    m.amount += r.total_amount;
+    if (r.payment_rate !== null) {
+      m.rateSum += r.payment_rate;
+      m.rateCount++;
+    }
+  });
+  const monthly = Object.values(monthlyMap).map(m => ({
+    "연월": m.ym,
+    "거래건수": m.count,
+    "총두수": m.head,
+    "총생체중": m.live,
+    "총거래금액": m.amount,
+    "평균kg당가격": m.live > 0 ? Math.round(m.amount / m.live) : 0,
+    "도체율": m.live > 0 ? parseFloat((m.carcass / m.live * 100).toFixed(2)) : 0,
+    "평균지급률": m.rateCount > 0 ? parseFloat((m.rateSum / m.rateCount).toFixed(2)) : null
+  })).sort((a,b) => a.연월.localeCompare(b.연월));
 
   return {
-    companyName, region,
-    총거래건수: rows.length,
-    총거래금액: totalAmount,
-    총두수: totalHead,
-    평균kg당가격: totalLive > 0 ? Math.round(unitPriceWeighted / totalLive) : 0,
-    평균도체율: totalLive > 0 ? parseFloat((totalCarcass / totalLive * 100).toFixed(2)) : 0,
-    평균지급률: rateCount > 0 ? parseFloat((rateSum / rateCount).toFixed(2)) : null,
-    지급률기재건수: rateCount,
-    gender: { 암: femaleHeadSum, 거세: castratedHeadSum, 수: maleHeadSum },
-    monthly: monthlyList,
-    weekly: weeklyList,
-    daily: dailyList,
-    rate_histogram: rateHistogram,
-    field_status: fieldStatus,
-    last_reg_date: lastRegDate,
-    reference_date: refDate,
-    days_since_last_reg: daysSinceLastReg,
-    anomalies,
-    detail,
-    first_date: rows[0].date,
-    last_date: rows[rows.length-1].date
+    "업체": companyName,
+    "거래건수": count,
+    "총두수": head,
+    "총생체중": live,
+    "총거래금액": amount,
+    "평균지급률": rateAvg !== null ? parseFloat(rateAvg.toFixed(2)) : null,
+    "평균kg당가격": live > 0 ? Math.round(amount / live) : 0,
+    "도체율": live > 0 ? parseFloat((carcass / live * 100).toFixed(2)) : 0,
+    "daily": daily,
+    "weekly": weekly,
+    "monthly": monthly
   };
 }
 
@@ -2389,8 +2779,8 @@ function buildRegistrationStatusList(){
 }
 
 let regStatusGranularity = '월';
-// 서버 API(/api/company-reg-trend)로 최근에 조회한 결과. 다운로드 버튼이
-// 원본 엑셀을 다시 파싱하지 않고 화면에 표시된 데이터를 그대로 내려받도록 캐시해 둔다.
+// computeCompanyRegTrend()로 최근에 조회한 결과. 다운로드 버튼이
+// 다시 계산하지 않고 화면에 표시된 데이터를 그대로 내려받도록 캐시해 둔다.
 let p11LastTrend = null;
 let p11LastCompany = '';
 const p11Charts = {}; // canvas id -> Chart 인스턴스
@@ -2419,26 +2809,12 @@ function setRegStatusGranularity(g){
 // 선택한 업체 1개에 대해서만 월/주/일 단위로 등록 횟수·거래일 횟수를 다시 집계한다.
 // (일 단위 구간에서는 그 구간 안의 조사일자가 하나뿐이라 거래일수가 항상 0 또는 1이 된다)
 function computeCompanyRegTrend(companyName, startDate, endDate){
-  const rows = [];
-  for (let i = 3; i < excelPriceRows.length; i++) {
-    const r = excelPriceRows[i];
-    if (!r || r.length < 2) continue;
-    const company = r[0];
-    const dateStr = r[1];
-    if (!company || !dateStr) continue;
-    if (company !== companyName) continue;
-
-    let regDate = dateStr;
-    if (r[16]) {
-      const m = String(r[16]).match(/^(\d{4}-\d{2}-\d{2})/);
-      if (m) regDate = m[1];
-    }
-    if (startDate && regDate < startDate) continue;
-    if (endDate && regDate > endDate) continue;
-
-    rows.push({ date: dateStr });
-  }
-  rows.sort((a,b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  const sd = startDate || '1970-01-01';
+  const ed = endDate || '2999-12-31';
+  const rows = allPriceRecords
+    .filter(r => r.company_name === companyName && r.date_str >= sd && r.date_str <= ed)
+    .map(r => ({ date: r.date_str }))
+    .sort((a,b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
 
   const monthlyGroup = {}, weeklyGroup = {}, dailyGroup = {};
   rows.forEach(r => {
@@ -2563,12 +2939,7 @@ async function renderP11(){
   el.innerHTML = `<div class="card" style="text-align:center; padding: 40px;"><div class="loader-spinner" style="margin: 0 auto 15px;"></div><p style="color:var(--text-sub);">업체 데이터를 조회 중입니다...</p></div>`;
 
   try {
-    const res = await fetch(`/api/company-reg-trend?company=${encodeURIComponent(companyName)}&startDate=${start}&endDate=${end}`);
-    if (!res.ok) {
-      el.innerHTML = `<div class="card"><div class="note">데이터가 없습니다.</div></div>`;
-      return;
-    }
-    const trend = await res.json();
+    const trend = computeCompanyRegTrend(companyName, start, end);
     p11LastTrend = trend;
     p11LastCompany = companyName;
 
@@ -2756,13 +3127,15 @@ async function renderP8(){
   el.innerHTML = `<div class="card" style="text-align:center; padding: 40px;"><div class="loader-spinner" style="margin: 0 auto 15px;"></div><p style="color:var(--text-sub);">업체 데이터를 조회 중입니다...</p></div>`;
   
   try {
-    const res = await fetch(`/api/biz-stats?company=${encodeURIComponent(targetCompany)}&startDate=${start}&endDate=${end}`);
-    if (!res.ok) {
+    const sd = start || '1970-01-01';
+    const ed = end || '2999-12-31';
+    const filteredRecords = allPriceRecords.filter(r => r.date_str >= sd && r.date_str <= ed);
+    const biz = computeBizStats(targetCompany, filteredRecords);
+    if (!biz) {
       el.innerHTML = `<div class="card"><div class="note">선택하신 조회기간에 해당하는 거래 데이터가 없습니다. 조회기간을 다시 확인해 주세요.</div></div>`;
       return;
     }
-    const biz = await res.json();
-    
+
     // Anomaly 및 결측 데이터 체크
     const rateAvailable = biz.평균지급률 !== null;
     const hasAnomaly = biz.거래건수 > 0 && biz.daily.some(d => d.평균kg당가격 < 2500 || d.평균kg당가격 > 9000);
@@ -3926,29 +4299,115 @@ document.addEventListener('mouseover', event => {
   }
 });
 
-// 파일은 이 브라우저에서만 읽고 분석한다. 정적 사이트에 비밀 토큰을 보관하거나
-// GitHub에 직접 쓰는 방식은 안전하지 않으므로 서버 동기화 기능을 제공하지 않는다.
-async function uploadExcelToServer(fieldName, file) {
-  const password = prompt('데이터 업로드를 위한 관리자 비밀번호를 입력해 주세요:');
-  if (!password) {
-    alert('비밀번호를 입력해야 업로드할 수 있습니다.');
+// 엑셀은 이 브라우저에서 직접 파싱한 뒤 Supabase(pig_companies/pig_price_records)에
+// 적재한다. 업로드 이력은 남기지 않고 매번 기존 데이터를 지우고 새로 채운다(현행화).
+// 1단계에서는 비밀번호 없이 누구나 업로드 가능(요구사항), 잠금은 추후 추가 예정.
+function parseNumClient(val) {
+  if (val === null || val === undefined || val === '') return 0;
+  if (typeof val === 'number') return val;
+  return parseFloat(String(val).replace(/,/g, '')) || 0;
+}
+
+async function insertInBatches(table, rows, batchSize = 500) {
+  for (let i = 0; i < rows.length; i += batchSize) {
+    const chunk = rows.slice(i, i + batchSize);
+    const { error } = await supabaseClient.from(table).insert(chunk);
+    if (error) throw error;
+  }
+}
+
+async function uploadPriceExcelToSupabase(file) {
+  try {
+    if (!supabaseClient) throw new Error('Supabase 설정을 찾을 수 없습니다.');
+    const rawRows = await new Promise(resolve => readExcelFile(file, resolve));
+
+    const TEST_COMPANIES = ['돼지거래test'];
+    const compRegionMap = {};
+    allCompanies.forEach(c => { compRegionMap[c.company_name] = regionGroupOf(c.sido_name); });
+
+    const parsed = [];
+    for (let i = 3; i < rawRows.length; i++) {
+      const r = rawRows[i];
+      if (!r || r.length < 2) continue;
+      const company = r[0];
+      const dateStr = r[1];
+      if (!company || !dateStr) continue;
+      if (TEST_COMPANIES.includes(company)) continue;
+
+      let regDateStr = dateStr;
+      if (r[16]) {
+        const match = String(r[16]).match(/^(\d{4}-\d{2}-\d{2})/);
+        if (match) regDateStr = match[1];
+      }
+
+      parsed.push({
+        company_name: company,
+        date_str: dateStr,
+        reg_date_str: regDateStr,
+        head_count: parseNumClient(r[2]),
+        live_weight: parseNumClient(r[3]),
+        total_amount: parseNumClient(r[4]),
+        payment_rate: (r[5] !== null && r[5] !== undefined && r[5] !== '') ? parseFloat(r[5]) : null,
+        carcass_head: parseNumClient(r[6]),
+        carcass_weight: parseNumClient(r[7]),
+        female_head: parseNumClient(r[8]),
+        female_weight: parseNumClient(r[9]),
+        castrated_head: parseNumClient(r[10]),
+        castrated_weight: parseNumClient(r[11]),
+        male_head: parseNumClient(r[12]),
+        male_weight: parseNumClient(r[13]),
+        price_type: r[14] || '',
+        applied_price: parseNumClient(r[15]),
+        region_group: compRegionMap[company] || '기타'
+      });
+    }
+
+    if (parsed.length === 0) throw new Error('가격정보 시트에서 유효한 거래 행을 찾지 못했습니다.');
+
+    const { error: delErr } = await supabaseClient.from('pig_price_records').delete().gte('id', 0);
+    if (delErr) throw delErr;
+    await insertInBatches('pig_price_records', parsed);
+
+    alert(`가격정보 ${parsed.length}건이 적재되었습니다.`);
+    return true;
+  } catch (err) {
+    console.error(err);
+    alert('업로드 실패: ' + err.message);
     return false;
   }
+}
 
-  const formData = new FormData();
-  formData.append(fieldName, file);
-  formData.append('password', password);
-
+async function uploadCompanyExcelToSupabase(file) {
   try {
-    const res = await fetch('/api/upload', {
-      method: 'POST',
-      body: formData
-    });
-    const result = await res.json();
-    if (!res.ok || !result.success) {
-      throw new Error(result.error || 'Server upload failed');
+    if (!supabaseClient) throw new Error('Supabase 설정을 찾을 수 없습니다.');
+    const rawRows = await new Promise(resolve => readExcelFile(file, resolve));
+
+    const headers = rawRows[0] || [];
+    const nameIdx = headers.indexOf('업체명');
+    const regionIdx = headers.indexOf('시도명');
+    const useIdx = headers.indexOf('사용여부');
+    if (nameIdx === -1) throw new Error('업체정보 시트에 "업체명" 컬럼이 없습니다.');
+
+    const parsed = [];
+    for (let i = 1; i < rawRows.length; i++) {
+      const r = rawRows[i];
+      if (!r || r.length === 0) continue;
+      const name = r[nameIdx];
+      if (!name) continue;
+      parsed.push({
+        company_name: name,
+        sido_name: r[regionIdx] || '',
+        use_yn: r[useIdx] || 'Y'
+      });
     }
-    alert(result.message || '데이터베이스 적재에 성공했습니다!');
+
+    if (parsed.length === 0) throw new Error('업체정보 시트에서 유효한 업체 행을 찾지 못했습니다.');
+
+    const { error: delErr } = await supabaseClient.from('pig_companies').delete().neq('company_name', '');
+    if (delErr) throw delErr;
+    await insertInBatches('pig_companies', parsed);
+
+    alert(`업체정보 ${parsed.length}건이 적재되었습니다.`);
     return true;
   } catch (err) {
     console.error(err);
@@ -3960,15 +4419,15 @@ async function uploadExcelToServer(fieldName, file) {
 document.getElementById('inputPriceExcel').addEventListener('change', async function(e) {
   const file = e.target.files[0];
   if (!file) return;
-  
-  const textEl = document.getElementById('textPriceExcel');
-  textEl.textContent = "1. 가격정보 서버 전송 중...";
 
-  const success = await uploadExcelToServer('priceExcel', file);
+  const textEl = document.getElementById('textPriceExcel');
+  textEl.textContent = "1. 가격정보 업로드 중...";
+
+  const success = await uploadPriceExcelToSupabase(file);
   if (success) {
-    textEl.textContent = "1. 가격정보 DB 적재 완료 (서버 연동 🟢)";
+    textEl.textContent = "1. 가격정보 적재 완료 🟢";
     document.getElementById('labelPriceExcel').classList.add('loaded');
-    
+
     // DB 및 UI 리로드
     await loadEmbeddedOnly();
   } else {
@@ -3979,15 +4438,15 @@ document.getElementById('inputPriceExcel').addEventListener('change', async func
 document.getElementById('inputCompanyExcel').addEventListener('change', async function(e) {
   const file = e.target.files[0];
   if (!file) return;
-  
-  const textEl = document.getElementById('textCompanyExcel');
-  textEl.textContent = "2. 업체정보 서버 전송 중...";
 
-  const success = await uploadExcelToServer('companyExcel', file);
+  const textEl = document.getElementById('textCompanyExcel');
+  textEl.textContent = "2. 업체정보 업로드 중...";
+
+  const success = await uploadCompanyExcelToSupabase(file);
   if (success) {
-    textEl.textContent = "2. 업체정보 DB 적재 완료 (서버 연동 🟢)";
+    textEl.textContent = "2. 업체정보 적재 완료 🟢";
     document.getElementById('labelCompanyExcel').classList.add('loaded');
-    
+
     // DB 및 UI 리로드
     await loadEmbeddedOnly();
   } else {
@@ -4066,20 +4525,30 @@ document.getElementById('filterRegion').addEventListener('change', populateCompa
 
 async function loadEmbeddedOnly() {
   try {
-    // 1. 필터 데이터 로드
-    const filterRes = await fetch('/api/filters');
-    if (!filterRes.ok) throw new Error('Failed to load filter definitions');
-    FILTER_DATA = await filterRes.json();
+    // 1. Supabase에서 원본 레코드 전체 로드
+    await loadAllDataFromSupabase();
 
-    // 2. 대시보드 통계 최초 1회 Fetch
+    // 2. 필터 데이터 구성 (구 /api/filters와 동일한 모양)
+    const activeCompanies = allCompanies.filter(c => c.use_yn === 'Y');
+    const regionsSet = new Set(allPriceRecords.map(r => r.region_group).filter(g => g && g !== '기타'));
+    const monthsSet = new Set(allPriceRecords.map(r => (r.date_str || '').substring(0, 7)).filter(Boolean));
+    FILTER_DATA = {
+      regions: Array.from(regionsSet),
+      companies: activeCompanies
+        .map(c => ({ name: c.company_name, region: regionGroupOf(c.sido_name) }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+      months: Array.from(monthsSet).sort()
+    };
+
+    // 3. 대시보드 통계 최초 1회 집계
     await fetchDashboardData('', '', '', '');
 
-    // 3. UI 바인딩 및 렌더링
+    // 4. UI 바인딩 및 렌더링
     initFilterRange();
     updateDashboard();
   } catch (e) {
     console.error('Failed to load dashboard data:', e);
-    alert('DB 데이터 로드에 실패했습니다. 서버가 작동 중인지 확인하고 엑셀 데이터를 업로드해 주세요.');
+    alert('DB 데이터 로드에 실패했습니다. Supabase 설정을 확인하거나 엑셀 데이터를 업로드해 주세요.');
   } finally {
     const overlay = document.getElementById('loadingOverlay');
     if (overlay) overlay.classList.add('hidden');

@@ -3,6 +3,3 @@ node_modules/
 Thumbs.db
 .claude/
 .gemini/
-
-# 로컬 SQLite DB 파일 제외 (배포 서버 구동 시 data 폴더 내 엑셀로 자동 빌드함)
-db/
