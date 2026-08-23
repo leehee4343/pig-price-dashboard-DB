@@ -69,7 +69,11 @@ body { display: flex; }
 
 /* ---------- sidebar ---------- */
 .sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
   width: 230px;
+  height: 100vh;
   flex-shrink: 0;
   background: var(--navy);
   color: #fff;
@@ -222,7 +226,8 @@ body { display: flex; }
 }
 
 /* ---------- main ---------- */
-.main { flex: 1; width: 100%; min-width: 0; padding: 24px 28px; box-sizing: border-box; }
+.main { flex: 1; width: 100%; min-width: 0; padding: 24px 28px; box-sizing: border-box; margin-left: 230px; transition: margin-left 0.22s ease; }
+.sidebar.closed ~ .main { margin-left: 0; }
 .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; flex-wrap: wrap; gap: 14px; }
 .topbar-left { display: flex; align-items: center; gap: 12px; }
 .topbar h1 { font-size: 19px; color: var(--navy); font-weight: 700; }
@@ -687,7 +692,7 @@ tbody tr:hover { background: var(--bg); }
   body.sidebar-open .sidebar-backdrop { display: block; }
   body.sidebar-open { overflow: hidden; }
 
-  .main { width: 100%; padding: 20px 18px; }
+  .main { width: 100%; padding: 20px 18px; margin-left: 0; }
 }
 
 /* ---------- 반응형: 스마트폰 (640px 이하) ---------- */
@@ -715,7 +720,7 @@ tbody tr:hover { background: var(--bg); }
   html, body { height: auto !important; overflow: visible !important; }
   body { display: block !important; }
   .sidebar, .sidebar-toggle-btn, .filter-container, .sidebar-backdrop { display: none !important; }
-  .main { display: block !important; padding: 0; width: 100%; }
+  .main { display: block !important; padding: 0; width: 100%; margin-left: 0 !important; }
   .table-scroll { max-height: none !important; overflow: visible !important; }
   .card, .kpi { box-shadow: none !important; break-inside: avoid; page-break-inside: avoid; }
 }
@@ -876,12 +881,12 @@ tbody tr:hover { background: var(--bg); }
     <div class="upload-title">데이터 원천 엑셀 업로드</div>
     <label class="file-upload-btn" id="labelPriceExcel">
       <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-      <span class="file-info-text" id="textPriceExcel">1. 가격정보 업로드 (❌)</span>
+      <span class="file-info-text" id="textPriceExcel">1. 가격정보 업로드</span>
       <input type="file" id="inputPriceExcel" accept=".xlsx" style="display:none;">
     </label>
     <label class="file-upload-btn" id="labelCompanyExcel">
       <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      <span class="file-info-text" id="textCompanyExcel">2. 업체정보 업로드 (❌)</span>
+      <span class="file-info-text" id="textCompanyExcel">2. 업체정보 업로드</span>
       <input type="file" id="inputCompanyExcel" accept=".xlsx" style="display:none;">
     </label>
   </div>
@@ -1014,8 +1019,13 @@ const supabaseClient = (window.supabase && _pigSupabaseCfg.url && _pigSupabaseCf
   ? window.supabase.createClient(_pigSupabaseCfg.url, _pigSupabaseCfg.anonKey)
   : null;
 
-let allCompanies = [];    // pig_companies 테이블 원본 행
-let allPriceRecords = []; // pig_price_records 테이블 원본 행
+// allCompanies/allPriceRecords는 화면 렌더링용(비밀번호에 따라 업체명이 익명화될 수 있음).
+// allCompaniesRaw/allPriceRecordsRaw는 항상 실제 업체명 그대로인 원본이며, 업로드 시
+// 권역 매핑처럼 실제 업체명이 꼭 필요한 내부 로직에서만 사용한다.
+let allCompanies = [];       // pig_companies 테이블 (화면 표시용, 익명화 가능)
+let allPriceRecords = [];    // pig_price_records 테이블 (화면 표시용, 익명화 가능)
+let allCompaniesRaw = [];    // pig_companies 테이블 원본 (항상 실제 업체명)
+let allPriceRecordsRaw = []; // pig_price_records 테이블 원본 (항상 실제 업체명)
 
 // Supabase(PostgREST)는 select('*')를 기본 1000행으로 잘라서 응답하므로,
 // 전체를 다 받을 때까지 range()로 페이지를 나눠 반복 조회한다.
@@ -1033,14 +1043,47 @@ async function fetchAllRows(table) {
   return allRows;
 }
 
+// 업체명을 'A식육포장처리업체', 'B식육포장처리업체', ... 순으로 바꿔주는 맵을 만든다.
+// 26개를 넘어가면 스프레드시트 열 이름처럼 AA, AB, ... 로 이어진다.
+// 실제 업체명(가나다순)을 기준으로 매핑해 새로고침해도 같은 업체는 항상 같은 이름을 받는다.
+function indexToAlphaLabel(i) {
+  let s = '';
+  let n = i + 1;
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
+function buildAnonCompanyNameMap(companies) {
+  const sortedNames = [...new Set(companies.map(c => c.company_name))].sort((a, b) => a.localeCompare(b, 'ko'));
+  const map = {};
+  sortedNames.forEach((name, i) => { map[name] = `${indexToAlphaLabel(i)}식육포장처리업체`; });
+  return map;
+}
+
+// 로그인 비밀번호에 따라 화면에 실제 업체명을 보여줄지, 익명화된 이름을 보여줄지 결정한다.
+function applyCompanyAnonymization() {
+  if (!ANONYMIZE_COMPANIES) {
+    allCompanies = allCompaniesRaw;
+    allPriceRecords = allPriceRecordsRaw;
+    return;
+  }
+  const nameMap = buildAnonCompanyNameMap(allCompaniesRaw);
+  allCompanies = allCompaniesRaw.map(c => ({ ...c, company_name: nameMap[c.company_name] || c.company_name }));
+  allPriceRecords = allPriceRecordsRaw.map(r => ({ ...r, company_name: nameMap[r.company_name] || r.company_name }));
+}
+
 async function loadAllDataFromSupabase() {
   if (!supabaseClient) throw new Error('Supabase 설정을 찾을 수 없습니다 (config/supabase.config.js 확인 필요).');
   const [companies, priceRecords] = await Promise.all([
     fetchAllRows('pig_companies'),
     fetchAllRows('pig_price_records')
   ]);
-  allCompanies = companies;
-  allPriceRecords = priceRecords;
+  allCompaniesRaw = companies;
+  allPriceRecordsRaw = priceRecords;
+  applyCompanyAnonymization();
 }
 
 // ================= 관리자 대시보드 통계 집계 연산 로직 (구 server.js에서 이식) =================
@@ -4392,7 +4435,9 @@ async function uploadPriceExcelToSupabase(file) {
 
     const TEST_COMPANIES = ['돼지거래test'];
     const compRegionMap = {};
-    allCompanies.forEach(c => { compRegionMap[c.company_name] = regionGroupOf(c.sido_name); });
+    // 화면 표시용 allCompanies는 익명화되어 있을 수 있으므로, 실제 업체명이 필요한
+    // 권역 매핑에는 항상 원본(allCompaniesRaw)을 사용한다.
+    allCompaniesRaw.forEach(c => { compRegionMap[c.company_name] = regionGroupOf(c.sido_name); });
 
     const parsed = [];
     for (let i = 3; i < rawRows.length; i++) {
@@ -4631,9 +4676,12 @@ setChartDefaults();
 // undefined라 에러가 나므로, 최초 데이터 로드가 끝난 뒤에 페이지를 활성화한다.
 // ================= 접근 비밀번호 확인 =================
 // 정적 사이트라 완전한 접근 제어는 아니지만, 관계없는 방문자가 URL만 알고
-// 바로 데이터를 보는 것을 막기 위한 1차 확인 절차다.
-const DASHBOARD_PASSWORD = '1234';
-const AUTH_STORAGE_KEY = 'pig_dashboard_authed';
+// 바로 데이터를 보는 것을 막기 위한 1차 확인 절차다. 기억하지 않고 접속할 때마다 매번 확인한다.
+// '1234'로 로그인하면 업체명을 A/B/C... 식으로 익명화해서 보여주고,
+// '12345'로 로그인하면 실제 업체명을 그대로 보여준다.
+const DASHBOARD_PASSWORD_ANON = '1234';
+const DASHBOARD_PASSWORD_FULL = '12345';
+let ANONYMIZE_COMPANIES = false;
 
 function startDashboard() {
   document.getElementById('loadingOverlay').classList.remove('hidden');
@@ -4650,8 +4698,9 @@ const authError = document.getElementById('authError');
 
 authForm.addEventListener('submit', function(e) {
   e.preventDefault();
-  if (authPassword.value === DASHBOARD_PASSWORD) {
-    localStorage.setItem(AUTH_STORAGE_KEY, 'ok');
+  const pw = authPassword.value;
+  if (pw === DASHBOARD_PASSWORD_ANON || pw === DASHBOARD_PASSWORD_FULL) {
+    ANONYMIZE_COMPANIES = (pw === DASHBOARD_PASSWORD_ANON);
     authOverlay.classList.add('hidden');
     startDashboard();
   } else {
@@ -4661,12 +4710,7 @@ authForm.addEventListener('submit', function(e) {
   }
 });
 
-if (localStorage.getItem(AUTH_STORAGE_KEY) === 'ok') {
-  authOverlay.classList.add('hidden');
-  startDashboard();
-} else {
-  authPassword.focus();
-}
+authPassword.focus();
 
 </script>
 </body>
