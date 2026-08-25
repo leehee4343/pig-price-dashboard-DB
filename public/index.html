@@ -4420,6 +4420,16 @@ function parseNumClient(val) {
   return parseFloat(String(val).replace(/,/g, '')) || 0;
 }
 
+// parseNumClient와 달리 원본 셀이 빈 칸이면 0이 아니라 null을 반환한다.
+// "업체별 항목 입력 현황"의 미입력 판정(isBlank)이 0과 진짜 빈 칸을 구분해야 하는
+// 필드(두수/생체중/총거래금액/도체두수/도체중/적용단가)에 사용한다.
+function parseNumOrNullClient(val) {
+  if (val === null || val === undefined || val === '') return null;
+  if (typeof val === 'number') return val;
+  const n = parseFloat(String(val).replace(/,/g, ''));
+  return Number.isNaN(n) ? null : n;
+}
+
 async function insertInBatches(table, rows, batchSize = 500) {
   for (let i = 0; i < rows.length; i += batchSize) {
     const chunk = rows.slice(i, i + batchSize);
@@ -4458,12 +4468,12 @@ async function uploadPriceExcelToSupabase(file) {
         company_name: company,
         date_str: dateStr,
         reg_date_str: regDateStr,
-        head_count: parseNumClient(r[2]),
-        live_weight: parseNumClient(r[3]),
-        total_amount: parseNumClient(r[4]),
+        head_count: parseNumOrNullClient(r[2]),
+        live_weight: parseNumOrNullClient(r[3]),
+        total_amount: parseNumOrNullClient(r[4]),
         payment_rate: (r[5] !== null && r[5] !== undefined && r[5] !== '') ? parseFloat(r[5]) : null,
-        carcass_head: parseNumClient(r[6]),
-        carcass_weight: parseNumClient(r[7]),
+        carcass_head: parseNumOrNullClient(r[6]),
+        carcass_weight: parseNumOrNullClient(r[7]),
         female_head: parseNumClient(r[8]),
         female_weight: parseNumClient(r[9]),
         castrated_head: parseNumClient(r[10]),
@@ -4471,7 +4481,7 @@ async function uploadPriceExcelToSupabase(file) {
         male_head: parseNumClient(r[12]),
         male_weight: parseNumClient(r[13]),
         price_type: r[14] || '',
-        applied_price: parseNumClient(r[15]),
+        applied_price: parseNumOrNullClient(r[15]),
         region_group: compRegionMap[company] || '기타'
       });
     }
