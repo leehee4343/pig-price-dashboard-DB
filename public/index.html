@@ -2611,13 +2611,35 @@ function downloadCompanyDetailTable(){
   XLSX.writeFile(wb, `돼지거래_업체별상세통계_${today}.xlsx`);
 }
 
+// 권역별 상세 통계에서 참여업체수/거래건수/총두수/거래금액처럼 합산 가능한 값은
+// 전체 권역 합계 대비 비중(%)을 함께 계산한다. 평균kg당가격은 평균값이라 비중 개념이
+// 성립하지 않으므로 대상에서 제외한다.
+function withRegionShare(sorted){
+  const totalCompany = sorted.reduce((s,d)=>s+d.업체수,0);
+  const totalCount = sorted.reduce((s,d)=>s+d.거래건수,0);
+  const totalHead = sorted.reduce((s,d)=>s+d.총두수,0);
+  const totalAmount = sorted.reduce((s,d)=>s+d.총거래금액,0);
+  const pct = (v, total) => total > 0 ? parseFloat((v / total * 100).toFixed(1)) : 0;
+  return sorted.map(d => ({
+    ...d,
+    업체수비중: pct(d.업체수, totalCompany),
+    거래건수비중: pct(d.거래건수, totalCount),
+    총두수비중: pct(d.총두수, totalHead),
+    거래금액비중: pct(d.총거래금액, totalAmount)
+  }));
+}
+
 function downloadRegionDetailTable(){
   if (typeof XLSX === 'undefined') { alert('엑셀 다운로드 기능을 사용할 수 없습니다 (xlsx 라이브러리 로드 실패).'); return; }
-  const sorted = [...DATA.region].sort((a,b)=>b.총거래금액-a.총거래금액);
+  const sorted = withRegionShare([...DATA.region].sort((a,b)=>b.총거래금액-a.총거래금액));
   if (!sorted.length) { alert('다운로드할 데이터가 없습니다.'); return; }
   const rows = sorted.map((d, i) => ({
-    '순위': i + 1, '권역': d.권역, '참여업체수': d.업체수, '거래건수': d.거래건수, '총두수': d.총두수,
-    '거래금액(억원)': parseFloat(eok(d.총거래금액)), '평균kg당가격(원)': d.평균kg당가격
+    '순위': i + 1, '권역': d.권역,
+    '참여업체수': d.업체수, '업체수 비중(%)': d.업체수비중,
+    '거래건수': d.거래건수, '거래건수 비중(%)': d.거래건수비중,
+    '총두수': d.총두수, '총두수 비중(%)': d.총두수비중,
+    '거래금액(억원)': parseFloat(eok(d.총거래금액)), '거래금액 비중(%)': d.거래금액비중,
+    '평균kg당가격(원)': d.평균kg당가격
   }));
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
@@ -2628,7 +2650,7 @@ function downloadRegionDetailTable(){
 
 // ================= P4 권역별 현황 =================
 function renderP4(){
-  const sorted = [...DATA.region].sort((a,b)=>b.총거래금액-a.총거래금액);
+  const sorted = withRegionShare([...DATA.region].sort((a,b)=>b.총거래금액-a.총거래금액));
   const byCompanyCount = [...DATA.region].sort((a,b)=>b.업체수-a.업체수);
   const topCompanyNote = byCompanyCount.slice(0, 2).map(d=>`${d.권역}(${d.업체수}개사)`).join('·');
   const topAmountNote = sorted.slice(0, 3).map(d=>`${d.권역}(${eok(d.총거래금액)})`).join(', ');
@@ -2642,13 +2664,14 @@ function renderP4(){
   <div class="card">
     ${cardHead('doc','권역별 상세 통계', downloadButtonHtml('downloadRegionDetailTable'))}
     <div class="table-scroll"><table>
-      <thead><tr><th>순위</th><th>권역</th><th>참여업체수</th><th>거래건수</th><th>총두수</th><th>거래금액(억원)</th><th>평균kg당가격(원)</th></tr></thead>
+      <thead><tr><th>순위</th><th>권역</th><th>참여업체수</th><th>비중(%)</th><th>거래건수</th><th>비중(%)</th><th>총두수</th><th>비중(%)</th><th>거래금액(억원)</th><th>비중(%)</th><th>평균kg당가격(원)</th></tr></thead>
       <tbody>${sorted.map((d,i)=>`<tr>
-        <td><span class="rank ${i<3?'top3':''}">${i+1}</span></td><td>${d.권역}</td><td>${d.업체수}</td>
-        <td>${fmt(d.거래건수)}</td><td>${fmt(d.총두수)}</td><td>${eok(d.총거래금액)}</td><td>${fmt(d.평균kg당가격)}</td>
+        <td><span class="rank ${i<3?'top3':''}">${i+1}</span></td><td>${d.권역}</td><td>${d.업체수}</td><td>${d.업체수비중}</td>
+        <td>${fmt(d.거래건수)}</td><td>${d.거래건수비중}</td><td>${fmt(d.총두수)}</td><td>${d.총두수비중}</td>
+        <td>${eok(d.총거래금액)}</td><td>${d.거래금액비중}</td><td>${fmt(d.평균kg당가격)}</td>
       </tr>`).join('')}</tbody>
     </table></div>
-    <div class="note">· ${topCompanyNote} 권역에 참여업체가 가장 많이 분포되어 있으며, 거래금액 기준으로는 ${topAmountNote} 순으로 규모가 큽니다.</div>
+    <div class="note">· ${topCompanyNote} 권역에 참여업체가 가장 많이 분포되어 있으며, 거래금액 기준으로는 ${topAmountNote} 순으로 규모가 큽니다. 비중(%)은 각 항목의 전체 권역 합계 대비 해당 권역의 비율입니다.</div>
   </div>`;
 
   new Chart(document.getElementById('c_reg_amount'), {
@@ -2659,7 +2682,7 @@ function renderP4(){
       ]},
     options:{responsive:true, maintainAspectRatio:false,
       scales:{ y:{position:'left', title:{display:true,text:'억원'}}, y1:{position:'right', grid:{drawOnChartArea:false}, title:{display:true,text:'원/kg'}} },
-      plugins:{legend:{position:'bottom'}} }
+      plugins:{legend:{position:'bottom'}, tooltip:{callbacks:{afterLabel:item=>item.datasetIndex===0?`비중 ${sorted[item.dataIndex].거래금액비중}%`:''}}} }
   });
 }
 
