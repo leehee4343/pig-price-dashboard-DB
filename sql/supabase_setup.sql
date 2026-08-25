@@ -6,11 +6,44 @@
 -- ==============================================================
 
 -- 1. 업체 정보
+-- 원본 업체정보 엑셀의 모든 컬럼을 그대로 저장한다(통계에 안 쓰이는 컬럼 포함, 팀 확정 방침).
+-- ceo_name 이하는 대표자명/주소/연락처/사업자등록번호/담당자 연락처/apikey 등 민감정보를 포함한다.
 create table if not exists public.pig_companies (
-  company_name text primary key,
-  sido_name    text,
-  use_yn       text default 'Y'
+  company_name         text primary key,
+  sido_name            text,
+  use_yn               text default 'Y',
+  ceo_name             text,
+  address              text,
+  contact              text,
+  manager_name         text,
+  business_reg_no      text,
+  reg_alarm_yn         text,
+  reg_manager1_name    text,
+  reg_manager1_contact text,
+  reg_manager2_name    text,
+  reg_manager2_contact text,
+  reg_manager3_name    text,
+  reg_manager3_contact text,
+  company_id_no        text,
+  apikey               text
 );
+
+-- 기존에 이미 만들어진 테이블에는 create table if not exists가 컬럼을 추가해주지 않으므로,
+-- 이미 pig_companies가 있는 환경(현재 운영 DB 포함)에서도 아래 구문으로 컬럼을 보강한다.
+alter table public.pig_companies add column if not exists ceo_name text;
+alter table public.pig_companies add column if not exists address text;
+alter table public.pig_companies add column if not exists contact text;
+alter table public.pig_companies add column if not exists manager_name text;
+alter table public.pig_companies add column if not exists business_reg_no text;
+alter table public.pig_companies add column if not exists reg_alarm_yn text;
+alter table public.pig_companies add column if not exists reg_manager1_name text;
+alter table public.pig_companies add column if not exists reg_manager1_contact text;
+alter table public.pig_companies add column if not exists reg_manager2_name text;
+alter table public.pig_companies add column if not exists reg_manager2_contact text;
+alter table public.pig_companies add column if not exists reg_manager3_name text;
+alter table public.pig_companies add column if not exists reg_manager3_contact text;
+alter table public.pig_companies add column if not exists company_id_no text;
+alter table public.pig_companies add column if not exists apikey text;
 
 alter table public.pig_companies enable row level security;
 drop policy if exists "pig_companies select" on public.pig_companies;
@@ -43,8 +76,12 @@ create table if not exists public.pig_price_records (
   male_weight      real,
   price_type       text,
   applied_price    real,
-  region_group     text
+  region_group     text,
+  registrant       text
 );
+
+-- 기존에 이미 만들어진 테이블에도 registrant 컬럼을 보강한다.
+alter table public.pig_price_records add column if not exists registrant text;
 
 create index if not exists pig_price_records_company_idx on public.pig_price_records(company_name);
 create index if not exists pig_price_records_date_idx on public.pig_price_records(date_str);

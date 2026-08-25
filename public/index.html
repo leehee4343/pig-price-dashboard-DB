@@ -1553,15 +1553,6 @@ function compileDashboardData(records, activeCompanies) {
 let excelPriceRows = null;
 let excelCompanyRows = null;
 
-function sanitizeCompanyRows(rows) {
-  if (!Array.isArray(rows) || !rows.length) return [];
-  const allowedFields = ['업체명', '시도명', '사용여부'];
-  const headers = rows[0] || [];
-  return [allowedFields, ...rows.slice(1).map(row =>
-    allowedFields.map(field => (row || [])[headers.indexOf(field)] ?? '')
-  )];
-}
-
 // 일부 외부 시스템이 내보낸 엑셀은 시트의 <dimension> 메타데이터가 실제 데이터 범위보다
 // 작게 남아있는 경우가 있다(예: 실제로는 4,700행인데 A1:R3로 기록됨). 이 값을 그대로 믿으면
 // SheetJS가 뒤쪽 데이터를 통째로 못 읽으므로, 실제로 존재하는 셀 좌표를 스캔해 범위를 다시 계산한다.
@@ -4583,7 +4574,8 @@ async function uploadPriceExcelToSupabase(file) {
         male_weight: parseNumOrNullClient(r[13]),
         price_type: r[14] || '',
         applied_price: parseNumOrNullClient(r[15]),
-        region_group: compRegionMap[company] || '기타'
+        region_group: compRegionMap[company] || '기타',
+        registrant: r[17] || ''
       });
     }
 
@@ -4602,28 +4594,50 @@ async function uploadPriceExcelToSupabase(file) {
   }
 }
 
+// 업체정보 엑셀 헤더 -> pig_companies 컬럼 매핑. 통계에 쓰이지 않는 항목(대표자명/주소/
+// 연락처/사업자 번호/담당자 연락처/apikey 등)도 팀 방침에 따라 전부 그대로 저장한다.
+const COMPANY_FIELD_MAP = [
+  { header: '업체명', col: 'company_name' },
+  { header: '시도명', col: 'sido_name' },
+  { header: '사용여부', col: 'use_yn', default: 'Y' },
+  { header: '대표자명', col: 'ceo_name' },
+  { header: '주소', col: 'address' },
+  { header: '연락처', col: 'contact' },
+  { header: '담당자', col: 'manager_name' },
+  { header: '사업자 번호', col: 'business_reg_no' },
+  { header: '등록알람여부', col: 'reg_alarm_yn' },
+  { header: '등록담당자1', col: 'reg_manager1_name' },
+  { header: '등록담당자 연락처1', col: 'reg_manager1_contact' },
+  { header: '등록담당자2', col: 'reg_manager2_name' },
+  { header: '등록담당자 연락처2', col: 'reg_manager2_contact' },
+  { header: '등록담당자3', col: 'reg_manager3_name' },
+  { header: '등록담당자 연락처3', col: 'reg_manager3_contact' },
+  { header: '업체 고유번호', col: 'company_id_no' },
+  { header: 'apikey', col: 'apikey' }
+];
+
 async function uploadCompanyExcelToSupabase(file) {
   try {
     if (!supabaseClient) throw new Error('Supabase 설정을 찾을 수 없습니다.');
     const rawRows = await new Promise(resolve => readExcelFile(file, resolve));
 
     const headers = rawRows[0] || [];
-    const nameIdx = headers.indexOf('업체명');
-    const regionIdx = headers.indexOf('시도명');
-    const useIdx = headers.indexOf('사용여부');
-    if (nameIdx === -1) throw new Error('업체정보 시트에 "업체명" 컬럼이 없습니다.');
+    const fields = COMPANY_FIELD_MAP.map(f => ({ ...f, idx: headers.indexOf(f.header) }));
+    const nameField = fields.find(f => f.col === 'company_name');
+    if (!nameField || nameField.idx === -1) throw new Error('업체정보 시트에 "업체명" 컬럼이 없습니다.');
 
     const parsed = [];
     for (let i = 1; i < rawRows.length; i++) {
       const r = rawRows[i];
       if (!r || r.length === 0) continue;
-      const name = r[nameIdx];
+      const name = r[nameField.idx];
       if (!name || TEST_COMPANIES.includes(name)) continue;
-      parsed.push({
-        company_name: name,
-        sido_name: r[regionIdx] || '',
-        use_yn: r[useIdx] || 'Y'
+      const row = {};
+      fields.forEach(f => {
+        const val = f.idx !== -1 ? r[f.idx] : undefined;
+        row[f.col] = (val !== undefined && val !== null && val !== '') ? val : (f.default !== undefined ? f.default : '');
       });
+      parsed.push(row);
     }
 
     if (parsed.length === 0) throw new Error('업체정보 시트에서 유효한 업체 행을 찾지 못했습니다.');
