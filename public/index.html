@@ -1354,10 +1354,6 @@ function compileDashboardData(records, activeCompanies) {
     };
   });
 
-  // 암/거세/수 성별 분할 항목은 거래를 성별로 나누지 않고 등록하면 정상적으로 비어있으므로
-  // (두수(생돈매입) = 암두수+거세두수+수두수 구조), 미입력 경고(빨간 배지) 대상에서는 제외하되
-  // 표 자체에는 다른 항목과 동일하게 입력건수/총건수를 그대로 계산해 넣는다.
-  const OPTIONAL_FIELD_KEYS = ['암 두수', '암 도체중(kg)', '거세 두수', '거세 도체중(kg)', '수 두수', '수 도체중(kg)'];
   const companyFieldQualityList = Object.values(companyGroup)
     .sort((a,b)=>b.count-a.count)
     .map(g => {
@@ -1369,8 +1365,7 @@ function compileDashboardData(records, activeCompanies) {
           "항목": f.key,
           "입력건수": filled,
           "총건수": g.count,
-          "입력비율": g.count > 0 ? parseFloat((filled / g.count * 100).toFixed(1)) : 0,
-          "경고제외": OPTIONAL_FIELD_KEYS.includes(f.key)
+          "입력비율": g.count > 0 ? parseFloat((filled / g.count * 100).toFixed(1)) : 0
         };
       });
       return { "업체": g.name, "총건수": g.count, "최근등록일": g.lastRegDate, "항목목록": 항목목록 };
@@ -2895,7 +2890,7 @@ function renderP7(){
         return `<tr>
         <td class="ellipsis" title="${c.업체}">${c.업체}</td><td>${fmt(c.총건수)}</td>
         <td>${daysSinceReg>20?`<span style="color:var(--red); font-weight:700;">${c.최근등록일}</span>`:c.최근등록일}</td>
-        ${c.항목목록.map(x=>`<td>${(x.입력비율<70 && !x.경고제외)?`<span class="badge red">${fmt(x.입력건수)}/${fmt(x.총건수)}</span>`:`${fmt(x.입력건수)}/${fmt(x.총건수)}`}</td>`).join('')}
+        ${c.항목목록.map(x=>`<td>${x.입력비율<70?`<span class="badge red">${fmt(x.입력건수)}/${fmt(x.총건수)}</span>`:`${fmt(x.입력건수)}/${fmt(x.총건수)}`}</td>`).join('')}
       </tr>`;
       }).join('')}</tbody>
     </table></div>
