@@ -2664,7 +2664,7 @@ function renderP4(){
   <div class="card">
     ${cardHead('doc','권역별 상세 통계', downloadButtonHtml('downloadRegionDetailTable'))}
     <div class="table-scroll"><table>
-      <thead><tr><th>순위</th><th>권역</th><th>참여업체수</th><th>비중(%)</th><th>거래건수</th><th>비중(%)</th><th>총두수</th><th>비중(%)</th><th>거래금액(억원)</th><th>비중(%)</th><th>평균kg당가격(원)</th></tr></thead>
+      <thead><tr><th>순위</th><th>권역</th><th>참여업체수</th><th>참여업체수 비중(%)</th><th>거래건수</th><th>거래건수 비중(%)</th><th>총두수</th><th>총두수 비중(%)</th><th>거래금액(억원)</th><th>거래금액 비중(%)</th><th>평균kg당가격(원)</th></tr></thead>
       <tbody>${sorted.map((d,i)=>`<tr>
         <td><span class="rank ${i<3?'top3':''}">${i+1}</span></td><td>${d.권역}</td><td>${d.업체수}</td><td>${d.업체수비중}</td>
         <td>${fmt(d.거래건수)}</td><td>${d.거래건수비중}</td><td>${fmt(d.총두수)}</td><td>${d.총두수비중}</td>
@@ -2677,12 +2677,17 @@ function renderP4(){
   new Chart(document.getElementById('c_reg_amount'), {
     data:{ labels: sorted.map(d=>d.권역),
       datasets:[
-        {type:'bar', label:'거래금액(억원)', data:sorted.map(d=>+(d.총거래금액/1e8).toFixed(1)), backgroundColor:CH.navy2, borderRadius:4, maxBarThickness:60, yAxisID:'y', order:2},
-        {type:'line', label:'평균 kg당가격(원)', data:sorted.map(d=>d.평균kg당가격), borderColor:CH.accent, backgroundColor:CH.accent, yAxisID:'y1', order:1, borderWidth:2.5, pointRadius:4, tension:.2}
+        {type:'bar', label:'거래금액(억원)', data:sorted.map(d=>+(d.총거래금액/1e8).toFixed(1)), backgroundColor:CH.navy2, borderRadius:4, maxBarThickness:60, yAxisID:'y', order:3},
+        {type:'line', label:'평균 kg당가격(원)', data:sorted.map(d=>d.평균kg당가격), borderColor:CH.accent, backgroundColor:CH.accent, yAxisID:'y1', order:1, borderWidth:2.5, pointRadius:4, tension:.2},
+        {type:'line', label:'거래금액 비중(%)', data:sorted.map(d=>d.거래금액비중), borderColor:CH.green, backgroundColor:CH.green, yAxisID:'y2', order:2, borderWidth:2, borderDash:[5,3], pointRadius:4, tension:.2}
       ]},
     options:{responsive:true, maintainAspectRatio:false,
-      scales:{ y:{position:'left', title:{display:true,text:'억원'}}, y1:{position:'right', grid:{drawOnChartArea:false}, title:{display:true,text:'원/kg'}} },
-      plugins:{legend:{position:'bottom'}, tooltip:{callbacks:{afterLabel:item=>item.datasetIndex===0?`비중 ${sorted[item.dataIndex].거래금액비중}%`:''}}} }
+      scales:{
+        y:{position:'left', title:{display:true,text:'억원'}},
+        y1:{position:'right', grid:{drawOnChartArea:false}, title:{display:true,text:'원/kg'}},
+        y2:{display:false, min:0, max:100}
+      },
+      plugins:{legend:{position:'bottom'}, tooltip:{callbacks:{label:item=>item.dataset.yAxisID==='y2'?`${item.dataset.label}: ${item.formattedValue}%`:`${item.dataset.label}: ${item.formattedValue}`}}} }
   });
 }
 
