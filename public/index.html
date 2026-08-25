@@ -274,7 +274,7 @@ body { display: flex; }
   color: var(--sub);
   white-space: nowrap;
 }
-.filter-item input[type="date"] {
+.filter-item input.filter-date {
   padding: 6px 10px;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
@@ -283,9 +283,10 @@ body { display: flex; }
   font-size: 13px;
   font-family: inherit;
   outline: none;
+  width: 108px;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
-.filter-item input[type="date"]:focus {
+.filter-item input.filter-date:focus {
   border-color: var(--navy2);
   box-shadow: 0 0 0 3px rgba(37, 110, 159, 0.15);
 }
@@ -702,7 +703,7 @@ tbody tr:hover { background: var(--bg); }
   .topbar h1 { font-size: 16.5px; }
   .filter-container { width: 100%; }
   .filter-container .filter-item { flex: 1 1 auto; min-width: 0; }
-  .filter-container .filter-item input[type="date"],
+  .filter-container .filter-item input.filter-date,
   .filter-container .filter-item .filter-select { width: 100%; min-width: 0; box-sizing: border-box; }
   .filter-apply-btn, .print-btn { flex: 1 1 auto; justify-content: center; }
   .card { padding: 14px 14px; }
@@ -937,12 +938,12 @@ tbody tr:hover { background: var(--bg); }
     </div>
     <div class="filter-item" id="filterStartDateItem">
       <label for="filterStartDate">등록 시작일</label>
-      <input type="date" id="filterStartDate">
+      <input type="text" id="filterStartDate" class="filter-date" placeholder="YYYY-MM-DD" inputmode="numeric" autocomplete="off">
     </div>
     <span class="filter-separator" id="filterDateSeparator">~</span>
     <div class="filter-item" id="filterEndDateItem">
       <label for="filterEndDate">등록 종료일</label>
-      <input type="date" id="filterEndDate">
+      <input type="text" id="filterEndDate" class="filter-date" placeholder="YYYY-MM-DD" inputmode="numeric" autocomplete="off">
     </div>
     <div class="filter-item" id="filterMonthStartItem" style="display:none;">
       <label for="filterStartYear">조사월</label>
@@ -4654,7 +4655,19 @@ document.getElementById('btnApplyFilter').addEventListener('click', async functi
   const company = activePid === 'p10' ? '' : document.getElementById('filterCompany').value;
 
   if (!start || !end) {
-    alert('조회 시작일과 종료일을 올바르게 선택해 주세요.');
+    alert('조회 시작일과 종료일을 입력해 주세요. (예: 2025-10-01)');
+    return;
+  }
+  const DATE_FORMAT_RE = /^\d{4}-\d{2}-\d{2}$/;
+  const isValidCalendarDate = s => {
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return false;
+    const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+    const date = new Date(Date.UTC(y, mo - 1, d));
+    return date.getUTCFullYear() === y && date.getUTCMonth() === mo - 1 && date.getUTCDate() === d;
+  };
+  if (!DATE_FORMAT_RE.test(start) || !DATE_FORMAT_RE.test(end) || !isValidCalendarDate(start) || !isValidCalendarDate(end)) {
+    alert('날짜는 YYYY-MM-DD 형식으로 입력해 주세요. (예: 2025-10-01)');
     return;
   }
   if (start > end) {
