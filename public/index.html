@@ -1354,20 +1354,23 @@ function compileDashboardData(records, activeCompanies) {
     };
   });
 
-  const NON_REQUIRED_FIELD_KEYS = ['암 두수', '암 도체중(kg)', '거세 두수', '거세 도체중(kg)', '수 두수', '수 도체중(kg)'];
-  const requiredFieldDefs = fieldDefs.filter(f => !NON_REQUIRED_FIELD_KEYS.includes(f.key));
+  // 암/거세/수 성별 분할 항목은 거래를 성별로 나누지 않고 등록하면 정상적으로 비어있으므로
+  // (두수(생돈매입) = 암두수+거세두수+수두수 구조), 미입력 경고(빨간 배지) 대상에서는 제외하되
+  // 표 자체에는 다른 항목과 동일하게 입력건수/총건수를 그대로 계산해 넣는다.
+  const OPTIONAL_FIELD_KEYS = ['암 두수', '암 도체중(kg)', '거세 두수', '거세 도체중(kg)', '수 두수', '수 도체중(kg)'];
   const companyFieldQualityList = Object.values(companyGroup)
     .sort((a,b)=>b.count-a.count)
     .map(g => {
       const missingByField = companyFieldMissingCounts[g.name] || {};
-      const 항목목록 = requiredFieldDefs.map(f => {
+      const 항목목록 = fieldDefs.map(f => {
         const missing = missingByField[f.key] || 0;
         const filled = g.count - missing;
         return {
           "항목": f.key,
           "입력건수": filled,
           "총건수": g.count,
-          "입력비율": g.count > 0 ? parseFloat((filled / g.count * 100).toFixed(1)) : 0
+          "입력비율": g.count > 0 ? parseFloat((filled / g.count * 100).toFixed(1)) : 0,
+          "경고제외": OPTIONAL_FIELD_KEYS.includes(f.key)
         };
       });
       return { "업체": g.name, "총건수": g.count, "최근등록일": g.lastRegDate, "항목목록": 항목목록 };
@@ -2892,7 +2895,7 @@ function renderP7(){
         return `<tr>
         <td class="ellipsis" title="${c.업체}">${c.업체}</td><td>${fmt(c.총건수)}</td>
         <td>${daysSinceReg>20?`<span style="color:var(--red); font-weight:700;">${c.최근등록일}</span>`:c.최근등록일}</td>
-        ${c.항목목록.map(x=>`<td>${x.입력비율<70?`<span class="badge red">${fmt(x.입력건수)}/${fmt(x.총건수)}</span>`:`${fmt(x.입력건수)}/${fmt(x.총건수)}`}</td>`).join('')}
+        ${c.항목목록.map(x=>`<td>${(x.입력비율<70 && !x.경고제외)?`<span class="badge red">${fmt(x.입력건수)}/${fmt(x.총건수)}</span>`:`${fmt(x.입력건수)}/${fmt(x.총건수)}`}</td>`).join('')}
       </tr>`;
       }).join('')}</tbody>
     </table></div>
@@ -4474,12 +4477,12 @@ async function uploadPriceExcelToSupabase(file) {
         payment_rate: (r[5] !== null && r[5] !== undefined && r[5] !== '') ? parseFloat(r[5]) : null,
         carcass_head: parseNumOrNullClient(r[6]),
         carcass_weight: parseNumOrNullClient(r[7]),
-        female_head: parseNumClient(r[8]),
-        female_weight: parseNumClient(r[9]),
-        castrated_head: parseNumClient(r[10]),
-        castrated_weight: parseNumClient(r[11]),
-        male_head: parseNumClient(r[12]),
-        male_weight: parseNumClient(r[13]),
+        female_head: parseNumOrNullClient(r[8]),
+        female_weight: parseNumOrNullClient(r[9]),
+        castrated_head: parseNumOrNullClient(r[10]),
+        castrated_weight: parseNumOrNullClient(r[11]),
+        male_head: parseNumOrNullClient(r[12]),
+        male_weight: parseNumOrNullClient(r[13]),
         price_type: r[14] || '',
         applied_price: parseNumOrNullClient(r[15]),
         region_group: compRegionMap[company] || '기타'
