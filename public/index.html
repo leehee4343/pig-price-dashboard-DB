@@ -1454,6 +1454,31 @@ function compileDashboardData(records, activeCompanies) {
     ...recentlyInactiveCompanies.map(d => ({ "업체": d.업체, "권역": d.권역, "상태": "최근 1개월 이상 미등록", "최근등록일": d.최근등록일, "경과일수": d.경과일수 }))
   ];
 
+  // ================= (월별) 업체별 등록일-거래일 차이 분석 =================
+  // 거래일(date) 기준 월로 묶어서, 등록일(regDate) - 거래일 차이(일)를 업체별로 평균낸다.
+  const regGapMonths = Object.keys(monthlyGroup).sort();
+  const regGapByCompanyMonth = {};
+  validRows.forEach(r => {
+    if (!r.date || !r.regDate) return;
+    const diffDays = (new Date(r.regDate + 'T00:00:00') - new Date(r.date + 'T00:00:00')) / 86400000;
+    if (isNaN(diffDays)) return;
+    const ym = r.date.substring(0, 7);
+    if (!regGapByCompanyMonth[r.company]) regGapByCompanyMonth[r.company] = {};
+    if (!regGapByCompanyMonth[r.company][ym]) regGapByCompanyMonth[r.company][ym] = { sum: 0, count: 0 };
+    regGapByCompanyMonth[r.company][ym].sum += diffDays;
+    regGapByCompanyMonth[r.company][ym].count++;
+  });
+  const regGapMonthlyList = Object.values(companyGroup)
+    .sort((a,b) => b.count - a.count)
+    .map(g => {
+      const byMonth = regGapByCompanyMonth[g.name] || {};
+      const 월별차이 = regGapMonths.map(ym => {
+        const m = byMonth[ym];
+        return { "연월": ym, "평균차이일": m ? parseFloat((m.sum / m.count).toFixed(1)) : null };
+      });
+      return { "업체": g.name, "월별차이": 월별차이 };
+    });
+
   return {
     kpi: {
       "총거래건수": validRows.length,
@@ -1471,6 +1496,8 @@ function compileDashboardData(records, activeCompanies) {
     daily: dailyList,
     company: companyList,
     region: regionList,
+    reg_gap_months: regGapMonths,
+    reg_gap_monthly: regGapMonthlyList,
     gender: {
       "두수": {
         "암": femaleHeadSum,
@@ -3020,7 +3047,20 @@ function renderP10(){
   ${zeroCount>0?`<div class="card">
     ${cardHead('warn','미등록 업체 안내')}
     <div class="note" style="font-size:13px;">· 조사기간 동안 거래가격을 한 건도 등록하지 않은 업체가 <b style="color:var(--red);">${zeroCount}개사</b> 있습니다. 상세 사유는 <a href="#" onclick="document.querySelector('.nav-item[data-page=p7]').click(); return false;" style="color:var(--navy); text-decoration:underline;">'데이터 품질·이상치' 메뉴</a>에서 확인할 수 있습니다.</div>
-  </div>`:''}`;
+  </div>`:''}
+  <div class="grid1">
+    <div class="card">
+      ${cardHead('calendar','(월별) 업체별 등록일과 거래일 차이 분석표', downloadButtonHtml('downloadRegGapMonthlyTable'))}
+      <div class="table-scroll" style="max-height:520px;"><table class="tbl-compact">
+        <thead><tr><th>업체명</th>${DATA.reg_gap_months.map(ym=>`<th>${ym}</th>`).join('')}</tr></thead>
+        <tbody>${DATA.reg_gap_monthly.map(c=>`<tr>
+          <td class="ellipsis" title="${c.업체}">${c.업체}</td>
+          ${c.월별차이.map(x=>`<td>${fmt1(x.평균차이일)}</td>`).join('')}
+        </tr>`).join('')}</tbody>
+      </table></div>
+      <div class="note" style="font-size:13px;">· 등록일(시스템 등록일)에서 거래일(조사일자)을 뺀 차이(일)를, 거래가 발생한 월 기준으로 업체별 평균낸 값입니다(소수점 첫째자리 반올림). 값이 클수록 거래 발생 후 등록까지 지연이 크다는 의미이며, 해당 월에 거래가 없으면 '-'로 표시됩니다.</div>
+    </div>
+  </div>`;
 
   new Chart(document.getElementById('c_reg_count'), {
     type:'bar',
@@ -3176,6 +3216,23 @@ function downloadRegistrationStatusTable(){
   XLSX.utils.book_append_sheet(wb, ws, '업체별등록현황');
   const today = new Date().toISOString().slice(0, 10);
   XLSX.writeFile(wb, `돼지거래_업체별등록현황_${today}.xlsx`);
+}
+
+function downloadRegGapMonthlyTable(){
+  if (typeof XLSX === 'undefined') { alert('엑셀 다운로드 기능을 사용할 수 없습니다 (xlsx 라이브러리 로드 실패).'); return; }
+  const months = DATA.reg_gap_months || [];
+  const list = DATA.reg_gap_monthly || [];
+  if (!list.length) { alert('다운로드할 데이터가 없습니다.'); return; }
+  const rows = list.map(c => {
+    const row = { '업체명': c.업체 };
+    c.월별차이.forEach((x, i) => { row[months[i]] = x.평균차이일 === null ? '' : x.평균차이일; });
+    return row;
+  });
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '등록거래일차이');
+  const today = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(wb, `돼지거래_월별업체별등록거래일차이_${today}.xlsx`);
 }
 
 // ================= P8 업체용 종합현황 =================
