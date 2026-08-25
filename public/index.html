@@ -947,12 +947,12 @@ tbody tr:hover { background: var(--bg); }
     </div>
     <div class="filter-item" id="filterStartDateItem">
       <label for="filterStartDate">등록 시작일</label>
-      <input type="text" id="filterStartDate" class="filter-date" placeholder="YYYY-MM-DD" inputmode="numeric" autocomplete="off">
+      <input type="text" id="filterStartDate" class="filter-date" placeholder="YYYY-MM-DD" autocomplete="off">
     </div>
     <span class="filter-separator" id="filterDateSeparator">~</span>
     <div class="filter-item" id="filterEndDateItem">
       <label for="filterEndDate">등록 종료일</label>
-      <input type="text" id="filterEndDate" class="filter-date" placeholder="YYYY-MM-DD" inputmode="numeric" autocomplete="off">
+      <input type="text" id="filterEndDate" class="filter-date" placeholder="YYYY-MM-DD" autocomplete="off">
     </div>
     <div class="filter-item" id="filterMonthStartItem" style="display:none;">
       <label for="filterStartYear">조사월</label>
@@ -1091,11 +1091,13 @@ async function loadAllDataFromSupabase() {
     fetchAllRows('pig_companies'),
     fetchAllRows('pig_price_records')
   ]);
-  // 업체정보 엑셀에 테스트 계정('돼지거래test')이 섞여 있어도 업체 수·미등록 업체 목록·
-  // 업체 선택 드롭다운 등 업체 목록을 쓰는 모든 통계에서 처음부터 제외한다.
-  // 거래가격 쪽은 uploadPriceExcelToSupabase()가 업로드 시점에 이미 걸러 DB에 안 들어간다.
+  // 업체정보/가격정보 엑셀에 테스트 계정('돼지거래test')이 섞여 있어도 모든 통계에서
+  // 처음부터 제외한다. 업로드 로직에도 동일 필터가 있어 신규 업로드분은 애초에 DB에
+  // 안 들어가지만, 과거에 이미 들어간 행이 남아있을 수 있어 조회 시점에도 한 번 더 거른다.
+  // 여기서 걸러야 allPriceRecordsRaw 기반의 익명화 매핑(buildAnonCompanyNameMap)도
+  // 이 업체를 대상에서 완전히 제외하게 된다.
   allCompaniesRaw = companies.filter(c => !TEST_COMPANIES.includes(c.company_name));
-  allPriceRecordsRaw = priceRecords;
+  allPriceRecordsRaw = priceRecords.filter(r => !TEST_COMPANIES.includes(r.company_name));
   applyCompanyAnonymization();
 }
 
@@ -2036,10 +2038,15 @@ function generateTableFromChartInstance(chart) {
     // 모든 열에 동일한 최소 폭을 부여하고 table-scroll에서 가로 스크롤한다.
     const autoTableColumnCount = labels.length + 1 + (isSizePriceChart ? 2 : 0);
     table.style.minWidth = `${Math.max(100, autoTableColumnCount * (isSizePriceChart ? 140 : 96))}px`;
-    if (isSizePriceChart) table.classList.add('size-price-detail-table');
-    // 헤더가 업체명 등 긴 라벨일 때 말줄임(...)으로 잘리지 않도록, 이 표는 열 너비를
-    // 내용에 맞춰 자동으로 늘리고(table-layout:auto) 필요하면 가로 스크롤로 본다.
-    table.classList.add('auto-gen-table');
+    if (isSizePriceChart) {
+      table.classList.add('size-price-detail-table');
+    } else {
+      // 헤더가 업체명 등 긴 라벨일 때 말줄임(...)으로 잘리지 않도록, 이 표는 열 너비를
+      // 내용에 맞춰 자동으로 늘리고(table-layout:auto) 필요하면 가로 스크롤로 본다.
+      // size-price-detail-table은 문장형 셀을 줄바꿈하는 별도 규칙을 이미 쓰고 있어 제외한다
+      // (두 클래스를 같이 쓰면 동일 우선순위 규칙끼리 CSS 선언 순서로 충돌한다).
+      table.classList.add('auto-gen-table');
+    }
     
     const thead = document.createElement('thead');
     const headRow = document.createElement('tr');
@@ -2650,7 +2657,7 @@ function downloadRegionDetailTable(){
   if (!sorted.length) { alert('다운로드할 데이터가 없습니다.'); return; }
   const rows = sorted.map((d, i) => ({
     '순위': i + 1, '권역': d.권역,
-    '참여업체수': d.업체수, '업체수 비중(%)': d.업체수비중,
+    '참여업체수': d.업체수, '참여업체수 비중(%)': d.업체수비중,
     '거래건수': d.거래건수, '거래건수 비중(%)': d.거래건수비중,
     '총두수': d.총두수, '총두수 비중(%)': d.총두수비중,
     '거래금액(억원)': parseFloat(eok(d.총거래금액)), '거래금액 비중(%)': d.거래금액비중,
