@@ -3051,10 +3051,10 @@ function renderP10(){
         <thead><tr><th>업체명</th>${DATA.reg_gap_months.map(ym=>`<th>${ym}</th>`).join('')}</tr></thead>
         <tbody>${DATA.reg_gap_monthly.map(c=>`<tr>
           <td class="ellipsis" title="${c.업체}">${c.업체}</td>
-          ${c.월별차이.map(x=>`<td>${fmt1(x.평균차이일)}</td>`).join('')}
+          ${c.월별차이.map(x=>`<td>${x.평균차이일!==null && x.평균차이일>=10?`<span class="badge red">${fmt1(x.평균차이일)}</span>`:fmt1(x.평균차이일)}</td>`).join('')}
         </tr>`).join('')}</tbody>
       </table></div>
-      <div class="note" style="font-size:13px;">· 등록일(시스템 등록일)에서 거래일(조사일자)을 뺀 차이(일)를, 거래가 발생한 월 기준으로 업체별 평균낸 값입니다(소수점 첫째자리 반올림). 값이 클수록 거래 발생 후 등록까지 지연이 크다는 의미이며, 해당 월에 거래가 없으면 '-'로 표시됩니다.</div>
+      <div class="note" style="font-size:13px;">· 등록일(시스템 등록일)에서 거래일(조사일자)을 뺀 차이(일)를, 거래가 발생한 월 기준으로 업체별 평균낸 값입니다(소수점 첫째자리 반올림). 값이 클수록 거래 발생 후 등록까지 지연이 크다는 의미이며, 해당 월에 거래가 없으면 '-'로 표시됩니다. <b style="color:var(--red);">10일 이상</b>인 경우 빨간색으로 표시됩니다.</div>
     </div>
   </div>`;
 
