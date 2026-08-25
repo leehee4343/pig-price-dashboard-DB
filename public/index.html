@@ -3044,10 +3044,6 @@ function renderP10(){
       </table></div>
     </div>
   </div>
-  ${zeroCount>0?`<div class="card">
-    ${cardHead('warn','미등록 업체 안내')}
-    <div class="note" style="font-size:13px;">· 조사기간 동안 거래가격을 한 건도 등록하지 않은 업체가 <b style="color:var(--red);">${zeroCount}개사</b> 있습니다. 상세 사유는 <a href="#" onclick="document.querySelector('.nav-item[data-page=p7]').click(); return false;" style="color:var(--navy); text-decoration:underline;">'데이터 품질·이상치' 메뉴</a>에서 확인할 수 있습니다.</div>
-  </div>`:''}
   <div class="grid1">
     <div class="card">
       ${cardHead('calendar','(월별) 업체별 등록일과 거래일 차이 분석표', downloadButtonHtml('downloadRegGapMonthlyTable'))}
