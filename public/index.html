@@ -1091,7 +1091,10 @@ async function loadAllDataFromSupabase() {
     fetchAllRows('pig_companies'),
     fetchAllRows('pig_price_records')
   ]);
-  allCompaniesRaw = companies;
+  // 업체정보 엑셀에 테스트 계정('돼지거래test')이 섞여 있어도 업체 수·미등록 업체 목록·
+  // 업체 선택 드롭다운 등 업체 목록을 쓰는 모든 통계에서 처음부터 제외한다.
+  // 거래가격 쪽은 uploadPriceExcelToSupabase()가 업로드 시점에 이미 걸러 DB에 안 들어간다.
+  allCompaniesRaw = companies.filter(c => !TEST_COMPANIES.includes(c.company_name));
   allPriceRecordsRaw = priceRecords;
   applyCompanyAnonymization();
 }
@@ -4535,7 +4538,6 @@ async function uploadPriceExcelToSupabase(file) {
     if (!supabaseClient) throw new Error('Supabase 설정을 찾을 수 없습니다.');
     const rawRows = await new Promise(resolve => readExcelFile(file, resolve));
 
-    const TEST_COMPANIES = ['돼지거래test'];
     const compRegionMap = {};
     // 화면 표시용 allCompanies는 익명화되어 있을 수 있으므로, 실제 업체명이 필요한
     // 권역 매핑에는 항상 원본(allCompaniesRaw)을 사용한다.
@@ -4609,7 +4611,7 @@ async function uploadCompanyExcelToSupabase(file) {
       const r = rawRows[i];
       if (!r || r.length === 0) continue;
       const name = r[nameIdx];
-      if (!name) continue;
+      if (!name || TEST_COMPANIES.includes(name)) continue;
       parsed.push({
         company_name: name,
         sido_name: r[regionIdx] || '',
