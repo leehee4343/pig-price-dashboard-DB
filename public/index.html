@@ -570,6 +570,15 @@ body { display: flex; }
   text-overflow: clip;
   line-height: 1.5;
 }
+/* 차트 아래 자동 생성 표는 업체명 등 라벨이 헤더로 들어가므로, 말줄임 대신
+   열 너비를 내용에 맞춰 늘리고(가로 스크롤은 .table-scroll이 담당) 한 줄로 보여준다. */
+.auto-gen-table { table-layout: auto; }
+.auto-gen-table th, .auto-gen-table td {
+  max-width: none;
+  white-space: nowrap !important;
+  overflow: visible;
+  text-overflow: clip;
+}
 #lr_t_size_gender { min-width: 1120px; }
 #lr_t_size_gender th, #lr_t_size_gender td {
   max-width: none;
@@ -2025,6 +2034,9 @@ function generateTableFromChartInstance(chart) {
     const autoTableColumnCount = labels.length + 1 + (isSizePriceChart ? 2 : 0);
     table.style.minWidth = `${Math.max(100, autoTableColumnCount * (isSizePriceChart ? 140 : 96))}px`;
     if (isSizePriceChart) table.classList.add('size-price-detail-table');
+    // 헤더가 업체명 등 긴 라벨일 때 말줄임(...)으로 잘리지 않도록, 이 표는 열 너비를
+    // 내용에 맞춰 자동으로 늘리고(table-layout:auto) 필요하면 가로 스크롤로 본다.
+    table.classList.add('auto-gen-table');
     
     const thead = document.createElement('thead');
     const headRow = document.createElement('tr');
